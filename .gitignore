@@ -1,0 +1,9 @@
+/target
+/.claude
+/config.yaml
+/reader_cache.sqlite
+/reader_cache.sqlite-journal
+/reader_cache.sqlite-wal
+/reader_cache.sqlite-shm
+.env
+.DS_Store

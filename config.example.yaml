@@ -1,0 +1,9 @@
+rss:
+  groups:
+    - name: "Hobbies & tech"
+      feeds:
+        - https://news.ycombinator.com/rss
+        - https://lobste.rs/rss
+    - name: "Top stories"
+      feeds:
+        - https://feeds.bbci.co.uk/news/world/rss.xml
