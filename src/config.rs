@@ -19,6 +19,30 @@ pub struct ConfigFile {
     /// Optional. Layout/density preferences for the reader UI.
     #[serde(default, skip_serializing_if = "ViewConfig::is_default")]
     pub view: ViewConfig,
+    /// Optional. When absent, no Gemini server is started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gemini: Option<GeminiConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct GeminiConfig {
+    /// Bind address, e.g. "0.0.0.0:1965" (the Gemini default port).
+    pub bind: String,
+    /// PEM path for the TLS certificate. Generated on first launch if
+    /// missing — Gemini uses TOFU, so once a client trusts the cert
+    /// keep these files stable across restarts.
+    pub cert_pem: PathBuf,
+    /// PEM path for the TLS private key. Generated alongside `cert_pem`.
+    pub key_pem: PathBuf,
+    /// Names embedded as Subject Alternative Names in a freshly generated
+    /// certificate. Include every hostname or IP a client might use to
+    /// reach the server (e.g. `localhost`, your LAN IP, your mDNS name).
+    #[serde(default = "default_san")]
+    pub hostnames: Vec<String>,
+}
+
+fn default_san() -> Vec<String> {
+    vec!["localhost".into()]
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]

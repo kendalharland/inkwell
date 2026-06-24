@@ -21,6 +21,7 @@ mod admin;
 mod config;
 mod extract;
 mod feeds;
+mod gemini;
 mod jobs;
 mod logging;
 mod routes;
@@ -221,6 +222,17 @@ async fn main() -> Result<()> {
         });
     } else {
         tracing::info!("no [scheduler] block in config — running without background jobs");
+    }
+
+    // Optional Gemini server. Failure to start it is logged but does
+    // not block the HTTP reader from coming up.
+    if let Some(gem_cfg) = config.gemini.clone() {
+        let state = state.clone();
+        tokio::spawn(async move {
+            if let Err(e) = gemini::serve(state, gem_cfg).await {
+                tracing::error!("gemini server exited: {e:#}");
+            }
+        });
     }
 
     let port: u16 = std::env::var("PORT")

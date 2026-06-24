@@ -23,3 +23,17 @@ scheduler:
   article_ttl_days: 30
   # Errors and job activity are appended here. Created if missing.
   log_file: ./inkwell.log
+
+# Optional. UI density.
+view:
+  compact_default: false
+
+# Optional. Serve the same content over the Gemini protocol on TLS.
+# Cert + key are generated on first launch if the files don't exist;
+# Gemini clients use TOFU so keep them stable across restarts.
+gemini:
+  bind: "0.0.0.0:1965"
+  cert_pem: "./gemini.cert.pem"
+  key_pem: "./gemini.key.pem"
+  hostnames:
+    - localhost

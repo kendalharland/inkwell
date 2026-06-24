@@ -6,5 +6,7 @@
 /reader_cache.sqlite-wal
 /reader_cache.sqlite-shm
 /inkwell.log
+/gemini.cert.pem
+/gemini.key.pem
 .env
 .DS_Store

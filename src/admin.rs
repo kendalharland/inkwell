@@ -156,6 +156,7 @@ mod tests {
             rss: RssConfig { groups: Vec::new() },
             scheduler: None,
             view: ViewConfig::default(),
+            gemini: None,
         }
     }
 
