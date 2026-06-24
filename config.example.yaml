@@ -7,3 +7,19 @@ rss:
     - name: "Top stories"
       feeds:
         - https://feeds.bbci.co.uk/news/world/rss.xml
+
+# Background jobs run via the honker SQLite scheduler. The same
+# reader_cache.sqlite file is reused — no separate datastore.
+#
+# Cron expressions accept any of:
+#   "0 3 * * *"       5-field standard cron (min hr dom mon dow)
+#   "*/2 * * * * *"   6-field with leading seconds
+#   "@every 10m"      simple interval
+scheduler:
+  # Refresh every feed and pre-extract any newly-seen articles.
+  refresh: "@every 10m"
+  # Delete cached articles older than article_ttl_days.
+  purge: "0 3 * * *"
+  article_ttl_days: 30
+  # Errors and job activity are appended here. Created if missing.
+  log_file: ./inkwell.log
