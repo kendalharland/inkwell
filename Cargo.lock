@@ -973,6 +973,7 @@ dependencies = [
  "futures",
  "honker",
  "html-escape",
+ "mediatype",
  "readability",
  "reqwest 0.12.28",
  "rusqlite",
