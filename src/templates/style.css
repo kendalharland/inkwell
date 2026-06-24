@@ -1,43 +1,161 @@
-body{font-family:Georgia,serif;font-size:20px;line-height:1.5;max-width:40em;
-margin:1em auto;padding:0 1em;color:#000;background:#fff}
-a{color:#000}
-nav{border-bottom:2px solid #000;padding-bottom:.5em;margin-bottom:1em;font-size:17px}
-nav a{margin-right:1.2em;text-decoration:none}
-h1{font-size:26px;margin:.5em 0}
-h2{font-size:22px}
-ul.list{list-style:none;padding:0;margin:0}
-ul.list li{border-bottom:1px solid #888;padding:.9em 0}
-ul.list a{display:block;font-size:22px;text-decoration:none}
-.meta{color:#444;font-size:15px;margin-top:.2em}
-.empty{padding:2em 0;color:#555}
-.actions{margin:2em 0 4em;padding-top:1em;border-top:2px solid #000}
-.actions a.btn,.pager a{display:inline-block;padding:.7em 1.2em;border:2px solid #000;
-background:#fff;font-size:18px;margin:.3em .3em 0 0;text-decoration:none;color:#000}
-.pager{margin:1em 0 2em}
-.pager span{margin:0 .5em;font-size:16px}
-img{max-width:100%;height:auto}
-.img-fallback{font-style:italic;color:#333;border:1px solid #aaa;padding:.4em .8em;display:block;margin:.6em 0;background:#f4f4f4}
-pre{white-space:pre-wrap;word-wrap:break-word}
-blockquote{border-left:3px solid #888;margin:.8em 0;padding-left:.8em;color:#222}
-.err{border:2px solid #000;padding:1em;background:#eee}
-.admin-warn{background:#fff8e1;border:1px solid #c0a050;padding:.6em .9em;font-size:15px}
-.admin-group{border:1px solid #ccc;padding:.7em 1em;margin:1em 0}
-.admin-group h2{margin:0 0 .5em}
-.admin-group form.inline{display:inline-block;margin-right:.4em}
-.admin-group input[type=text],.admin-group input[type=url]{padding:.4em .6em;font-size:16px;font-family:inherit;border:1px solid #888}
-.admin-group button{padding:.4em .9em;font-size:15px;border:1px solid #555;background:#f4f4f4;cursor:pointer;font-family:inherit}
-.admin-group ul.list li{display:flex;align-items:center;gap:.7em;padding:.4em 0}
-.admin-group ul.list li .meta{flex:1;margin:0;word-break:break-all}
-.flash{padding:.6em .9em;margin:.8em 0;border:1px solid}
-.flash-ok{background:#e6f5e6;border-color:#6a8}
-.flash-err{background:#fde8e8;border-color:#c44}
+/* Colors live in custom properties so the dark variant is a single
+   class flip on <body>. Variable names map to roles, not literal
+   colors, so a new theme is just another override block. */
+:root {
+  --bg: #fff;
+  --fg: #1a1a1a;
+  --link: #1a1a1a;
+  --meta: #555;
+  --muted: #666;
+  --border: #999;
+  --rule: #1a1a1a;
+  --soft: #f4f4f4;
+  --soft-border: #c8c8c8;
+  --warn-bg: #fff8e1;
+  --warn-border: #c0a050;
+  --ok-bg: #e6f5e6;
+  --ok-border: #6a8;
+  --err-bg: #fde8e8;
+  --err-border: #c44;
+  --selection: #ffd866;
+}
 
-/* Compact density — toggled by ?compact=1 or scheduler.compact_default. */
-body.compact{font-size:17px;line-height:1.35;max-width:36em}
-body.compact h1{font-size:22px}
-body.compact h2{font-size:19px}
-body.compact nav{font-size:15px}
-body.compact ul.list li{padding:.45em 0}
-body.compact ul.list a{font-size:18px}
-body.compact .meta{font-size:13px}
-body.compact .pager a,body.compact .actions a.btn{padding:.45em .9em;font-size:16px}
+body.dark {
+  --bg: #14171a;
+  --fg: #d8d2c6;
+  --link: #ddd0b8;
+  --meta: #8a8a8a;
+  --muted: #757575;
+  --border: #3a3a3a;
+  --rule: #aaa;
+  --soft: #1c1f23;
+  --soft-border: #2a2e33;
+  --warn-bg: #2c2a18;
+  --warn-border: #5a5238;
+  --ok-bg: #1a2a1a;
+  --ok-border: #3a6a3a;
+  --err-bg: #2a1818;
+  --err-border: #743636;
+  --selection: #5a4a18;
+}
+
+body {
+  font-family: 'Source Serif Pro', 'Iowan Old Style', 'Charter', Georgia, 'Times New Roman', serif;
+  font-size: 19px;
+  line-height: 1.55;
+  max-width: 40em;
+  margin: 1em auto;
+  padding: 0 1em 4em;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+::selection { background: var(--selection); color: var(--fg); }
+
+a { color: var(--link); text-decoration-color: var(--border); text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+
+nav {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: .6em;
+  margin-bottom: 1.2em;
+  font-size: 15px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  letter-spacing: .01em;
+}
+nav a { margin-right: 1.2em; text-decoration: none; color: var(--muted); }
+nav a:hover { color: var(--fg); }
+
+h1 { font-size: 28px; margin: .4em 0 .6em; letter-spacing: -.01em; line-height: 1.2; }
+h2 { font-size: 22px; margin: 1em 0 .4em; letter-spacing: -.005em; }
+h3 { font-size: 19px; margin: 1em 0 .3em; }
+
+ul.list { list-style: none; padding: 0; margin: 0; }
+ul.list li { border-bottom: 1px solid var(--border); padding: .9em 0; }
+ul.list a { display: block; font-size: 20px; text-decoration: none; line-height: 1.35; }
+ul.list a:hover { text-decoration: underline; text-decoration-color: var(--meta); }
+
+.meta { color: var(--meta); font-size: 14px; margin-top: .25em; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+.empty { padding: 2em 0; color: var(--muted); }
+
+.actions { margin: 2em 0 4em; padding-top: 1em; border-top: 1px solid var(--border); }
+.actions a.btn, .pager a {
+  display: inline-block;
+  padding: .55em 1.1em;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 15px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: .3em .3em 0 0;
+  text-decoration: none;
+  border-radius: 3px;
+}
+.actions a.btn:hover, .pager a:hover { background: var(--soft); }
+.pager { margin: 1.2em 0 2em; }
+.pager span { margin: 0 .6em; font-size: 14px; color: var(--meta); font-family: 'Inter', sans-serif; }
+
+img { max-width: 100%; height: auto; border-radius: 2px; }
+.img-fallback {
+  font-style: italic;
+  color: var(--muted);
+  border: 1px solid var(--soft-border);
+  padding: .5em .9em;
+  display: block;
+  margin: .7em 0;
+  background: var(--soft);
+  border-radius: 3px;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  background: var(--soft);
+  padding: .6em .9em;
+  border-radius: 3px;
+  font-size: 14.5px;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+code { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; font-size: .92em; }
+
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: .9em 0;
+  padding: 0 0 0 1em;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.err { border: 1px solid var(--err-border); padding: 1em; background: var(--err-bg); border-radius: 3px; }
+
+.admin-warn { background: var(--warn-bg); border: 1px solid var(--warn-border); padding: .6em .9em; font-size: 14px; border-radius: 3px; }
+.admin-group { border: 1px solid var(--soft-border); padding: .7em 1em; margin: 1em 0; border-radius: 4px; }
+.admin-group h2 { margin: 0 0 .5em; }
+.admin-group form.inline { display: inline-block; margin-right: .4em; }
+.admin-group input[type=text], .admin-group input[type=url] {
+  padding: .4em .6em; font-size: 15px; font-family: inherit;
+  border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 3px;
+}
+.admin-group button {
+  padding: .4em .9em; font-size: 14px;
+  border: 1px solid var(--border); background: var(--soft);
+  color: var(--fg); cursor: pointer; font-family: inherit; border-radius: 3px;
+}
+.admin-group button:hover { background: var(--bg); }
+.admin-group ul.list li { display: flex; align-items: center; gap: .7em; padding: .4em 0; }
+.admin-group ul.list li .meta { flex: 1; margin: 0; word-break: break-all; }
+
+.flash { padding: .6em .9em; margin: .9em 0; border: 1px solid; border-radius: 3px; }
+.flash-ok { background: var(--ok-bg); border-color: var(--ok-border); }
+.flash-err { background: var(--err-bg); border-color: var(--err-border); }
+
+/* Compact density — toggled by ?compact=1 or view.compact_default. */
+body.compact { font-size: 16px; line-height: 1.4; max-width: 36em; }
+body.compact h1 { font-size: 22px; }
+body.compact h2 { font-size: 18px; }
+body.compact nav { font-size: 13px; }
+body.compact ul.list li { padding: .5em 0; }
+body.compact ul.list a { font-size: 17px; }
+body.compact .meta { font-size: 13px; }
+body.compact .pager a, body.compact .actions a.btn { padding: .4em .8em; font-size: 14px; }

@@ -260,6 +260,26 @@ mod tests {
         assert!(entry_full_html(&entry).is_none());
     }
 
+    // Unused now that collect_entries takes a `&[String]` instead of
+    // &AppState, but kept here as a sanity check that constructing a
+    // bare AppState still type-checks if a future test needs it.
+    #[allow(dead_code)]
+    fn fake_state() -> AppState {
+        AppState {
+            feeds: tokio::sync::RwLock::new(Vec::new()),
+            feed_titles: tokio::sync::RwLock::new(Vec::new()),
+            groups: tokio::sync::RwLock::new(Vec::new()),
+            http: reqwest::Client::new(),
+            feed_cache: tokio::sync::RwLock::new(HashMap::new()),
+            db: tokio::sync::Mutex::new(rusqlite::Connection::open_in_memory().unwrap()),
+            feed_ttl: std::time::Duration::from_secs(60),
+            article_ttl_secs: 86400,
+            compact_default: false,
+            dark_default: false,
+            config_path: std::path::PathBuf::from("test.yaml"),
+        }
+    }
+
     fn rss_with(items: &[(&str, &str, &str)]) -> feed_rs::model::Feed {
         let mut body = String::from(r#"<?xml version="1.0"?><rss version="2.0"><channel><title>F1</title>"#);
         for (title, link, pub_iso) in items {

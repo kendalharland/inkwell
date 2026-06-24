@@ -267,15 +267,29 @@ async fn route(state: Arc<AppState>, uri: &Url) -> GemResponse {
 // ---------------------------------------------------------------------------
 // Page renderers
 
+/// Minimal title-only header. Gemini clients have their own back/home
+/// navigation, so repeating top-of-page nav links on every screen just
+/// adds clutter (and `=>` lines render as "blue arrow bullets" in
+/// Lagrange). Inter-page navigation lives in `page_footer` instead.
 fn page_header(title: &str) -> String {
-    let mut h = String::new();
-    writeln!(h, "# {}", title).unwrap();
-    h.push('\n');
-    writeln!(h, "=> / All stories").unwrap();
-    writeln!(h, "=> /feeds Feeds").unwrap();
-    writeln!(h, "=> /groups Groups").unwrap();
-    h.push('\n');
-    h
+    format!("# {}\n\n", title)
+}
+
+/// Tail-of-page navigation. Keeps screens uncluttered while still giving
+/// the user a way to jump between top-level views without typing URLs.
+/// On the home page we drop the `=> /` self-link to avoid a no-op row.
+fn page_footer(current_path: &str) -> String {
+    let mut f = String::from("\n");
+    if current_path != "/" {
+        f.push_str("=> / All stories\n");
+    }
+    if current_path != "/feeds" {
+        f.push_str("=> /feeds Feeds\n");
+    }
+    if current_path != "/groups" {
+        f.push_str("=> /groups Groups\n");
+    }
+    f
 }
 
 fn render_listing(
@@ -294,6 +308,7 @@ fn render_listing(
     let mut out = page_header(title);
     if entries.is_empty() {
         out.push_str("No items.\n");
+        out.push_str(&page_footer(base_path));
         return out;
     }
     for e in &entries[start..end] {
@@ -331,6 +346,7 @@ fn render_listing(
         }
         writeln!(out, "Page {} of {}", page_num, total_pages).unwrap();
     }
+    out.push_str(&page_footer(base_path));
     out
 }
 
@@ -351,15 +367,16 @@ async fn render_feeds(state: Arc<AppState>) -> GemResponse {
     let mut out = page_header("Feeds");
     if feeds.is_empty() {
         out.push_str("No feeds configured.\n");
-        return GemResponse::ok(out);
+    } else {
+        for (i, url) in feeds.iter().enumerate() {
+            let title = titles
+                .get(i)
+                .and_then(|t| t.as_deref())
+                .unwrap_or(url.as_str());
+            writeln!(out, "=> /feed/{} {}", i, title).unwrap();
+        }
     }
-    for (i, url) in feeds.iter().enumerate() {
-        let title = titles
-            .get(i)
-            .and_then(|t| t.as_deref())
-            .unwrap_or(url.as_str());
-        writeln!(out, "=> /feed/{} {}", i, title).unwrap();
-    }
+    out.push_str(&page_footer("/feeds"));
     GemResponse::ok(out)
 }
 
@@ -389,20 +406,21 @@ async fn render_groups(state: Arc<AppState>) -> GemResponse {
     let mut out = page_header("Groups");
     if groups.is_empty() {
         out.push_str("No groups configured.\n");
-        return GemResponse::ok(out);
+    } else {
+        for (i, g) in groups.iter().enumerate() {
+            let count = g.feed_indices.len();
+            writeln!(
+                out,
+                "=> /group/{} {} ({} feed{})",
+                i,
+                g.name,
+                count,
+                if count == 1 { "" } else { "s" }
+            )
+            .unwrap();
+        }
     }
-    for (i, g) in groups.iter().enumerate() {
-        let count = g.feed_indices.len();
-        writeln!(
-            out,
-            "=> /group/{} {} ({} feed{})",
-            i,
-            g.name,
-            count,
-            if count == 1 { "" } else { "s" }
-        )
-        .unwrap();
-    }
+    out.push_str(&page_footer("/groups"));
     GemResponse::ok(out)
 }
 
@@ -501,7 +519,7 @@ async fn render_one_item(state: Arc<AppState>, iid: &str) -> GemResponse {
     writeln!(out, "=> {} Source: {}", link, hostname_of(&link)).unwrap();
     out.push('\n');
     out.push_str(&html_to_gemtext(&body_html));
-    out.push('\n');
+    out.push_str(&page_footer("/item/"));
     GemResponse::ok(out)
 }
 
@@ -750,12 +768,20 @@ mod tests {
     }
 
     #[test]
-    fn page_header_includes_navigation() {
+    fn page_header_is_title_only() {
         let h = page_header("X");
-        assert!(h.starts_with("# X"));
-        assert!(h.contains("=> / All stories"));
-        assert!(h.contains("=> /feeds Feeds"));
-        assert!(h.contains("=> /groups Groups"));
+        assert_eq!(h, "# X\n\n");
+    }
+
+    #[test]
+    fn page_footer_omits_self_link() {
+        assert!(!page_footer("/").contains("=> / "));
+        assert!(page_footer("/").contains("=> /feeds"));
+        assert!(page_footer("/").contains("=> /groups"));
+
+        assert!(page_footer("/feeds").contains("=> /"));
+        assert!(!page_footer("/feeds").contains("=> /feeds"));
+        assert!(page_footer("/feeds").contains("=> /groups"));
     }
 
     #[test]
@@ -775,6 +801,8 @@ mod tests {
 
         assert!(g1.contains("=> /?page=2 Next page"));
         assert!(!g1.contains("Previous page"));
+        // Footer is present and self-link is suppressed on the home page.
+        assert!(!g1.contains("=> / All stories"));
 
         assert!(g2.contains("=> /?page=1 Previous page"));
         assert!(g2.contains("=> /?page=3 Next page"));

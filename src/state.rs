@@ -55,6 +55,9 @@ pub struct AppState {
     /// Default for the compact-density UI when neither a cookie nor a
     /// query-string override is present on the request.
     pub compact_default: bool,
+    /// Default for the dark-theme variant. Same precedence rules as
+    /// `compact_default`.
+    pub dark_default: bool,
     /// Path of the YAML config file. The admin UI rewrites this file in
     /// place when feeds or groups change, then hot-reloads the live
     /// state. Comments in the original YAML are not preserved on

@@ -28,9 +28,12 @@ pub struct PageQ {
     #[serde(default = "default_page")]
     pub page: usize,
     /// `?compact=1` forces compact density on this request without
-    /// touching the cookie. Useful for one-shot testing.
+    /// touching the cookie. Useful for one-shot testing and sharing.
     #[serde(default)]
     pub compact: Option<u8>,
+    /// `?theme=dark` / `?theme=light` overrides without touching the cookie.
+    #[serde(default)]
+    pub theme: Option<String>,
 }
 fn default_page() -> usize {
     1
@@ -42,6 +45,8 @@ pub struct ItemQ {
     pub from: Option<String>,
     #[serde(default)]
     pub compact: Option<u8>,
+    #[serde(default)]
+    pub theme: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -49,7 +54,16 @@ struct CompactSettingQ {
     /// `1` = enable, `0` = disable, absent = toggle.
     #[serde(default)]
     to: Option<u8>,
-    /// Path to redirect back to after toggling. Must start with `/`.
+    /// Path to redirect back to. Must start with `/`.
+    #[serde(default)]
+    from: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ThemeSettingQ {
+    /// `dark` / `light`, absent = toggle.
+    #[serde(default)]
+    to: Option<String>,
     #[serde(default)]
     from: Option<String>,
 }
@@ -63,6 +77,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/group/{idx}", get(one_group))
         .route("/item/{iid}", get(one_item))
         .route("/settings/compact", get(set_compact))
+        .route("/settings/theme", get(set_theme))
         .route("/admin", get(admin_index))
         .route("/admin/feed/add", post(admin_add_feed))
         .route("/admin/feed/remove", post(admin_remove_feed))
@@ -71,78 +86,108 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-/// Precedence: explicit `?compact=` on this request wins; otherwise the
-/// sticky cookie; otherwise the config default. Returning a `&'static str`
-/// avoids an allocation in the common path.
-fn body_class(jar: &CookieJar, q: Option<u8>, default: bool) -> &'static str {
+/// Precedence for both compact and theme: explicit query param wins
+/// over the sticky cookie, which wins over the config default.
+fn effective_compact(jar: &CookieJar, q: Option<u8>, default: bool) -> bool {
     let from_query = q.map(|n| n != 0);
     let from_cookie = jar.get("compact").and_then(|c| match c.value() {
         "1" => Some(true),
         "0" => Some(false),
         _ => None,
     });
-    if from_query.or(from_cookie).unwrap_or(default) {
-        "compact"
-    } else {
-        ""
-    }
+    from_query.or(from_cookie).unwrap_or(default)
 }
 
-/// Toggle (or set) the sticky compact-density cookie and redirect the user
-/// back to where they came from. `?to=1` / `?to=0` set explicitly; absent
-/// `to` flips whatever the cookie currently holds (config default is
-/// treated as "off" for the toggle purpose so the user always reaches a
-/// definitive state after one click).
-async fn set_compact(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    jar: CookieJar,
-    Query(q): Query<CompactSettingQ>,
-) -> impl IntoResponse {
-    let current = jar
-        .get("compact")
-        .and_then(|c| match c.value() {
-            "1" => Some(true),
-            "0" => Some(false),
-            _ => None,
-        })
-        .unwrap_or(state.compact_default);
-    let next = match q.to {
-        Some(1) => true,
-        Some(0) => false,
-        _ => !current,
-    };
-    let cookie = Cookie::build((
-        "compact",
-        if next { "1" } else { "0" },
-    ))
-    .path("/")
-    .max_age(time::Duration::days(365))
-    .http_only(true)
-    .build();
-    let jar = jar.add(cookie);
+fn effective_dark(jar: &CookieJar, q: Option<&str>, default: bool) -> bool {
+    let from_query = q.and_then(|v| match v.to_ascii_lowercase().as_str() {
+        "dark" | "1" => Some(true),
+        "light" | "0" => Some(false),
+        _ => None,
+    });
+    let from_cookie = jar.get("theme").and_then(|c| match c.value() {
+        "dark" => Some(true),
+        "light" => Some(false),
+        _ => None,
+    });
+    from_query.or(from_cookie).unwrap_or(default)
+}
 
-    // Prefer an explicit `from` so the user can deep-link; fall back to
-    // the Referer header (present from the nav-link click on most
-    // browsers); finally fall back to the home page.
-    let back = q
-        .from
-        .as_deref()
-        .filter(|s| s.starts_with('/'))
+/// Composes the `<body class="...">` attribute value from the active
+/// density and theme preferences. Empty string when neither is on.
+fn body_classes(
+    jar: &CookieJar,
+    q_compact: Option<u8>,
+    q_theme: Option<&str>,
+    state: &AppState,
+) -> String {
+    let mut classes: Vec<&str> = Vec::new();
+    if effective_compact(jar, q_compact, state.compact_default) {
+        classes.push("compact");
+    }
+    if effective_dark(jar, q_theme, state.dark_default) {
+        classes.push("dark");
+    }
+    classes.join(" ")
+}
+
+/// Prefer an explicit `from` (must start with `/`); fall back to the
+/// Referer header so a nav-link click lands back on the same page;
+/// finally root.
+fn back_url(headers: &HeaderMap, from: Option<&str>) -> String {
+    from.filter(|s| s.starts_with('/'))
         .map(|s| s.to_string())
         .or_else(|| {
             headers
                 .get("referer")
                 .and_then(|h| h.to_str().ok())
                 .and_then(|s| Url::parse(s).ok())
-                .and_then(|u| {
+                .map(|u| {
                     let p = u.path().to_string();
                     let q = u.query().map(|q| format!("?{}", q)).unwrap_or_default();
-                    Some(format!("{}{}", p, q))
+                    format!("{}{}", p, q)
                 })
         })
-        .unwrap_or_else(|| "/".into());
-    (jar, Redirect::to(&back))
+        .unwrap_or_else(|| "/".into())
+}
+
+fn sticky_cookie(name: &str, value: &str) -> Cookie<'static> {
+    Cookie::build((name.to_string(), value.to_string()))
+        .path("/")
+        .max_age(time::Duration::days(365))
+        .http_only(true)
+        .build()
+}
+
+async fn set_compact(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    Query(q): Query<CompactSettingQ>,
+) -> impl IntoResponse {
+    let current = effective_compact(&jar, None, state.compact_default);
+    let next = match q.to {
+        Some(1) => true,
+        Some(0) => false,
+        _ => !current,
+    };
+    let jar = jar.add(sticky_cookie("compact", if next { "1" } else { "0" }));
+    (jar, Redirect::to(&back_url(&headers, q.from.as_deref())))
+}
+
+async fn set_theme(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    Query(q): Query<ThemeSettingQ>,
+) -> impl IntoResponse {
+    let current = effective_dark(&jar, None, state.dark_default);
+    let next = match q.to.as_deref().map(|s| s.to_ascii_lowercase()) {
+        Some(s) if s == "dark" || s == "1" => true,
+        Some(s) if s == "light" || s == "0" => false,
+        _ => !current,
+    };
+    let jar = jar.add(sticky_cookie("theme", if next { "dark" } else { "light" }));
+    (jar, Redirect::to(&back_url(&headers, q.from.as_deref())))
 }
 
 async fn all_stories(
@@ -150,14 +195,14 @@ async fn all_stories(
     jar: CookieJar,
     Query(q): Query<PageQ>,
 ) -> Html<String> {
-    let bc = body_class(&jar, q.compact, state.compact_default);
+    let bc = body_classes(&jar, q.compact, q.theme.as_deref(), &state);
     let feeds = state.feeds.read().await.clone();
     let all_idxs: Vec<usize> = (0..feeds.len()).collect();
     ensure_feeds(state.clone(), &all_idxs, false).await;
     let cache = state.feed_cache.read().await;
     let entries = collect_entries(&feeds, &cache, &all_idxs);
     let body = render_entries("All stories", &entries, q.page, "/", true);
-    Html(page("All stories", &body, bc))
+    Html(page("All stories", &body, &bc))
 }
 
 async fn feeds_list(
@@ -165,7 +210,7 @@ async fn feeds_list(
     jar: CookieJar,
     Query(q): Query<PageQ>,
 ) -> Html<String> {
-    let bc = body_class(&jar, q.compact, state.compact_default);
+    let bc = body_classes(&jar, q.compact, q.theme.as_deref(), &state);
     let feeds = state.feeds.read().await.clone();
     let all_idxs: Vec<usize> = (0..feeds.len()).collect();
     ensure_feeds(state.clone(), &all_idxs, false).await;
@@ -183,7 +228,7 @@ async fn feeds_list(
         .unwrap();
     }
     body.push_str("</ul>");
-    Html(page("Feeds", &body, bc))
+    Html(page("Feeds", &body, &bc))
 }
 
 async fn one_feed(
@@ -196,7 +241,7 @@ async fn one_feed(
     if idx >= feeds.len() {
         return Err(StatusCode::NOT_FOUND);
     }
-    let bc = body_class(&jar, q.compact, state.compact_default);
+    let bc = body_classes(&jar, q.compact, q.theme.as_deref(), &state);
     ensure_feeds(state.clone(), &[idx], false).await;
     let cache = state.feed_cache.read().await;
     let title = cache
@@ -205,7 +250,7 @@ async fn one_feed(
         .unwrap_or_else(|| feeds[idx].clone());
     let entries = collect_entries(&feeds, &cache, &[idx]);
     let body = render_entries(&title, &entries, q.page, &format!("/feed/{}", idx), false);
-    Ok(Html(page(&title, &body, bc)))
+    Ok(Html(page(&title, &body, &bc)))
 }
 
 async fn groups_list(
@@ -213,7 +258,7 @@ async fn groups_list(
     jar: CookieJar,
     Query(q): Query<PageQ>,
 ) -> Html<String> {
-    let bc = body_class(&jar, q.compact, state.compact_default);
+    let bc = body_classes(&jar, q.compact, q.theme.as_deref(), &state);
     let groups = state.groups.read().await.clone();
     let mut body = String::from("<h1>Groups</h1><ul class='list'>");
     for (i, g) in groups.iter().enumerate() {
@@ -229,7 +274,7 @@ async fn groups_list(
         .unwrap();
     }
     body.push_str("</ul>");
-    Html(page("Groups", &body, bc))
+    Html(page("Groups", &body, &bc))
 }
 
 async fn one_group(
@@ -245,13 +290,13 @@ async fn one_group(
         };
         (g.name.clone(), g.feed_indices.clone())
     };
-    let bc = body_class(&jar, q.compact, state.compact_default);
+    let bc = body_classes(&jar, q.compact, q.theme.as_deref(), &state);
     let feeds = state.feeds.read().await.clone();
     ensure_feeds(state.clone(), &indices, false).await;
     let cache = state.feed_cache.read().await;
     let entries = collect_entries(&feeds, &cache, &indices);
     let body = render_entries(&name, &entries, q.page, &format!("/group/{}", idx), true);
-    Ok(Html(page(&name, &body, bc)))
+    Ok(Html(page(&name, &body, &bc)))
 }
 
 /// Article render. Tries the persistent SQLite cache first (so a feed that
@@ -268,7 +313,7 @@ async fn one_item(
     AxumPath(iid): AxumPath<String>,
     Query(q): Query<ItemQ>,
 ) -> Result<Html<String>, StatusCode> {
-    let bc = body_class(&jar, q.compact, state.compact_default);
+    let bc = body_classes(&jar, q.compact, q.theme.as_deref(), &state);
     let back = q
         .from
         .as_deref()
@@ -359,7 +404,7 @@ async fn one_item(
             ("back", &encode_text(&back)),
         ],
     );
-    Ok(Html(page(&title, &body, bc)))
+    Ok(Html(page(&title, &body, &bc)))
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +445,7 @@ async fn admin_index(
         tracing::error!("admin: read_config failed: {e:#}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let bc = body_class(&jar, None, state.compact_default);
+    let bc = body_classes(&jar, None, None, &state);
 
     let flash = match (&q.ok, &q.err) {
         (Some(m), _) => format!("<div class='flash flash-ok'>{}</div>", encode_text(m)),
@@ -457,7 +502,7 @@ async fn admin_index(
         include_str!("templates/admin.html"),
         &[("flash", &flash), ("groups", &groups_html)],
     );
-    Ok(Html(page("Admin", &body, bc)))
+    Ok(Html(page("Admin", &body, &bc)))
 }
 
 fn redirect_with_flash(ok: Option<&str>, err: Option<&str>) -> Redirect {
@@ -530,33 +575,57 @@ mod tests {
         CookieJar::new()
     }
 
-    fn jar_with_compact(value: &str) -> CookieJar {
-        CookieJar::new().add(Cookie::new("compact", value.to_string()))
+    fn jar_with(name: &str, value: &str) -> CookieJar {
+        CookieJar::new().add(Cookie::new(name.to_string(), value.to_string()))
     }
 
     #[test]
-    fn body_class_uses_default_when_unset() {
-        assert_eq!(body_class(&make_jar(), None, false), "");
-        assert_eq!(body_class(&make_jar(), None, true), "compact");
+    fn effective_compact_default_when_unset() {
+        assert!(!effective_compact(&make_jar(), None, false));
+        assert!(effective_compact(&make_jar(), None, true));
     }
 
     #[test]
-    fn body_class_cookie_overrides_default() {
-        assert_eq!(body_class(&jar_with_compact("1"), None, false), "compact");
-        assert_eq!(body_class(&jar_with_compact("0"), None, true), "");
+    fn effective_compact_cookie_overrides_default() {
+        assert!(effective_compact(&jar_with("compact", "1"), None, false));
+        assert!(!effective_compact(&jar_with("compact", "0"), None, true));
     }
 
     #[test]
-    fn body_class_query_overrides_cookie() {
-        assert_eq!(body_class(&jar_with_compact("1"), Some(0), false), "");
-        assert_eq!(body_class(&jar_with_compact("0"), Some(1), false), "compact");
+    fn effective_compact_query_overrides_cookie() {
+        assert!(!effective_compact(&jar_with("compact", "1"), Some(0), false));
+        assert!(effective_compact(&jar_with("compact", "0"), Some(1), false));
     }
 
     #[test]
-    fn body_class_ignores_unknown_cookie_value() {
-        let jar = CookieJar::new().add(Cookie::new("compact", "yes"));
-        // Falls through to default since the cookie value isn't 1 or 0.
-        assert_eq!(body_class(&jar, None, true), "compact");
-        assert_eq!(body_class(&jar, None, false), "");
+    fn effective_compact_ignores_unknown_cookie_value() {
+        let jar = jar_with("compact", "yes");
+        assert!(effective_compact(&jar, None, true));
+        assert!(!effective_compact(&jar, None, false));
+    }
+
+    #[test]
+    fn effective_dark_default_when_unset() {
+        assert!(!effective_dark(&make_jar(), None, false));
+        assert!(effective_dark(&make_jar(), None, true));
+    }
+
+    #[test]
+    fn effective_dark_cookie_overrides_default() {
+        assert!(effective_dark(&jar_with("theme", "dark"), None, false));
+        assert!(!effective_dark(&jar_with("theme", "light"), None, true));
+    }
+
+    #[test]
+    fn effective_dark_query_overrides_cookie() {
+        // The cookie says dark but a `?theme=light` query forces light here.
+        assert!(!effective_dark(&jar_with("theme", "dark"), Some("light"), false));
+        assert!(effective_dark(&jar_with("theme", "light"), Some("dark"), false));
+    }
+
+    #[test]
+    fn effective_dark_accepts_1_and_0_aliases() {
+        assert!(effective_dark(&make_jar(), Some("1"), false));
+        assert!(!effective_dark(&make_jar(), Some("0"), true));
     }
 }

@@ -52,6 +52,10 @@ pub struct ViewConfig {
     /// stores their choice in a cookie.
     #[serde(default)]
     pub compact_default: bool,
+    /// When `true`, new visitors see the dark theme. Users can toggle
+    /// via the nav link; the choice persists in a cookie.
+    #[serde(default)]
+    pub dark_default: bool,
 }
 
 impl ViewConfig {

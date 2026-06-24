@@ -123,6 +123,7 @@ async fn main() -> Result<()> {
         feed_ttl,
         article_ttl_secs,
         compact_default: config.view.compact_default,
+        dark_default: config.view.dark_default,
         config_path: config_path.clone(),
     });
 
