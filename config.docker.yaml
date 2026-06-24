@@ -1,0 +1,39 @@
+# Default configuration baked into the Docker image. Override by
+# mounting your own file at /app/config.yaml, e.g.:
+#
+#   docker run -v $PWD/config.yaml:/app/config.yaml ...
+#
+# All paths inside this file are inside the container. Anything that
+# should survive a container recreation must live under /data, which
+# is declared as a volume in the Dockerfile.
+
+rss:
+  groups:
+    - name: "Hobbies & tech"
+      feeds:
+        - https://news.ycombinator.com/rss
+        - https://lobste.rs/rss
+    - name: "World"
+      feeds:
+        - https://feeds.bbci.co.uk/news/world/rss.xml
+
+scheduler:
+  refresh: "@every 10m"
+  purge: "0 3 * * *"
+  article_ttl_days: 30
+  log_file: /data/inkwell.log
+
+view:
+  compact_default: false
+  dark_default: false
+
+# Gemini is opt-in. Uncomment to enable; cert and key are generated on
+# first launch under /data so they persist across container restarts
+# (so Gemini clients keep their TOFU pin).
+#
+# gemini:
+#   bind: "0.0.0.0:1965"
+#   cert_pem: /data/gemini.cert.pem
+#   key_pem: /data/gemini.key.pem
+#   hostnames:
+#     - localhost
