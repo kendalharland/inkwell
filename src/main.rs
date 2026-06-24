@@ -17,6 +17,7 @@
 //! The crate-level safety properties of the scheduler are documented at the
 //! top of [`jobs`].
 
+mod admin;
 mod config;
 mod extract;
 mod feeds;
@@ -41,13 +42,14 @@ use anyhow::{Context, Result};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::{
+    admin::build_runtime_state,
     config::ConfigFile,
     jobs::{
         reconcile_schedules, run_purge, run_refresh, worker_loop, PURGE_QUEUE_NAME,
         REFRESH_QUEUE_NAME, SCHEDULER_OWNER,
     },
     logging::init_logging,
-    state::{AppState, GroupInfo},
+    state::AppState,
 };
 
 #[tokio::main]
@@ -63,31 +65,11 @@ async fn main() -> Result<()> {
 
     let _log_guard = init_logging(config.scheduler.as_ref().map(|s| s.log_file.as_path()));
 
-    // Deduplicate feeds across groups so a feed listed twice still gets one
-    // cache entry. Groups carry indices, not URL strings, for this reason.
-    let mut feeds: Vec<String> = Vec::new();
-    let mut url_to_idx: HashMap<String, usize> = HashMap::new();
-    let mut groups: Vec<GroupInfo> = Vec::new();
-    for g in config.rss.groups {
-        let mut idxs = Vec::new();
-        for url in g.feeds {
-            let idx = *url_to_idx.entry(url.clone()).or_insert_with(|| {
-                let i = feeds.len();
-                feeds.push(url);
-                i
-            });
-            idxs.push(idx);
-        }
-        groups.push(GroupInfo {
-            name: g.name,
-            feed_indices: idxs,
-        });
-    }
+    let (feeds, titles_vec, groups) = build_runtime_state(&config);
     if feeds.is_empty() {
         anyhow::bail!("no feeds configured");
     }
-
-    let feed_titles = RwLock::new(vec![None; feeds.len()]);
+    let feed_titles = RwLock::new(titles_vec);
 
     let timeout_secs: u64 = std::env::var("HTTP_TIMEOUT")
         .ok()
@@ -131,15 +113,16 @@ async fn main() -> Result<()> {
         .unwrap_or(30 * 86400);
 
     let state = Arc::new(AppState {
-        feeds,
+        feeds: RwLock::new(feeds),
         feed_titles,
-        groups,
+        groups: RwLock::new(groups),
         http,
         feed_cache: RwLock::new(HashMap::new()),
         db: Mutex::new(conn),
         feed_ttl,
         article_ttl_secs,
         compact_default: config.view.compact_default,
+        config_path: config_path.clone(),
     });
 
     // ---------- scheduler / workers ----------------------------------------

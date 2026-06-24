@@ -48,6 +48,11 @@ pub async fn fetch_feed_once(http: &reqwest::Client, url: &str) -> Result<Parsed
 /// affect siblings. This means the cache may have stale entries for a
 /// down feed; the user sees the last good snapshot.
 pub async fn ensure_feeds(state: Arc<AppState>, indices: &[usize], force: bool) {
+    // Snapshot the URL list once up front: handler-scoped lock holds
+    // are cheap, but if the admin UI swaps the feeds out mid-call we
+    // don't want to fetch a URL that just got removed.
+    let feeds_snapshot: Vec<String> = state.feeds.read().await.clone();
+
     let now = SystemTime::now();
     let to_fetch: Vec<usize> = if force {
         indices.to_vec()
@@ -72,10 +77,10 @@ pub async fn ensure_feeds(state: Arc<AppState>, indices: &[usize], force: bool) 
         return;
     }
 
-    let jobs = to_fetch.into_iter().map(|i| {
+    let jobs = to_fetch.into_iter().filter_map(|i| {
+        let url = feeds_snapshot.get(i).cloned()?;
         let state = state.clone();
-        async move {
-            let url = state.feeds[i].clone();
+        Some(async move {
             match fetch_feed_once(&state.http, &url).await {
                 Ok(parsed) => Some((i, parsed)),
                 Err(e) => {
@@ -83,7 +88,7 @@ pub async fn ensure_feeds(state: Arc<AppState>, indices: &[usize], force: bool) 
                     None
                 }
             }
-        }
+        })
     });
     let results = join_all(jobs).await;
 
@@ -92,8 +97,13 @@ pub async fn ensure_feeds(state: Arc<AppState>, indices: &[usize], force: bool) 
     let fetched_at = SystemTime::now();
     for opt in results {
         if let Some((i, parsed)) = opt {
-            if let Some(t) = parsed.title.as_ref().map(|t| t.content.clone()) {
-                titles[i] = Some(t);
+            // Titles vec may have been resized by the admin UI between
+            // when we snapshot'd `feeds_snapshot` and now — guard the
+            // index so we don't panic on a concurrent shrink.
+            if i < titles.len() {
+                if let Some(t) = parsed.title.as_ref().map(|t| t.content.clone()) {
+                    titles[i] = Some(t);
+                }
             }
             cache.insert(i, CachedFeed { parsed, fetched_at });
         }
@@ -114,19 +124,20 @@ pub struct EntryView {
 }
 
 pub fn collect_entries(
-    state: &AppState,
+    feeds: &[String],
     cache: &HashMap<usize, CachedFeed>,
     indices: &[usize],
 ) -> Vec<EntryView> {
     let mut out = Vec::new();
     for &i in indices {
         let Some(cf) = cache.get(&i) else { continue };
+        let fallback = feeds.get(i).cloned().unwrap_or_default();
         let feed_title = cf
             .parsed
             .title
             .as_ref()
             .map(|t| t.content.clone())
-            .unwrap_or_else(|| state.feeds[i].clone());
+            .unwrap_or(fallback);
         for e in &cf.parsed.entries {
             let link = e
                 .links
@@ -249,20 +260,6 @@ mod tests {
         assert!(entry_full_html(&entry).is_none());
     }
 
-    fn fake_state(feeds: Vec<&str>) -> AppState {
-        AppState {
-            feeds: feeds.into_iter().map(String::from).collect(),
-            feed_titles: tokio::sync::RwLock::new(Vec::new()),
-            groups: Vec::new(),
-            http: reqwest::Client::new(),
-            feed_cache: tokio::sync::RwLock::new(HashMap::new()),
-            db: tokio::sync::Mutex::new(rusqlite::Connection::open_in_memory().unwrap()),
-            feed_ttl: std::time::Duration::from_secs(60),
-            article_ttl_secs: 86400,
-            compact_default: false,
-        }
-    }
-
     fn rss_with(items: &[(&str, &str, &str)]) -> feed_rs::model::Feed {
         let mut body = String::from(r#"<?xml version="1.0"?><rss version="2.0"><channel><title>F1</title>"#);
         for (title, link, pub_iso) in items {
@@ -277,30 +274,22 @@ mod tests {
 
     #[test]
     fn collect_entries_sorts_newest_first() {
-        let state = fake_state(vec!["https://example.com/feed"]);
+        let feeds = vec!["https://example.com/feed".to_string()];
         let parsed = rss_with(&[
             ("Old", "https://example.com/a", "Mon, 01 Jan 2024 00:00:00 GMT"),
             ("New", "https://example.com/b", "Mon, 01 Jan 2026 00:00:00 GMT"),
             ("Mid", "https://example.com/c", "Mon, 01 Jan 2025 00:00:00 GMT"),
         ]);
         let mut cache = HashMap::new();
-        cache.insert(
-            0,
-            CachedFeed {
-                parsed,
-                fetched_at: std::time::SystemTime::now(),
-            },
-        );
-        let entries = collect_entries(&state, &cache, &[0]);
+        cache.insert(0, CachedFeed { parsed, fetched_at: std::time::SystemTime::now() });
+        let entries = collect_entries(&feeds, &cache, &[0]);
         let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
         assert_eq!(titles, vec!["New", "Mid", "Old"]);
     }
 
     #[test]
     fn collect_entries_skips_empty_links() {
-        let state = fake_state(vec!["https://example.com/feed"]);
-        // Entry without a <link> is skipped silently — there's nothing the
-        // user could tap, so it has no place in a listing.
+        let feeds = vec!["https://example.com/feed".to_string()];
         let body = r#"<?xml version="1.0"?>
             <rss version="2.0"><channel><title>F</title>
                 <item><title>has link</title><link>https://example.com/x</link></item>
@@ -308,39 +297,33 @@ mod tests {
             </channel></rss>"#;
         let parsed = feed_rs::parser::parse(body.as_bytes()).unwrap();
         let mut cache = HashMap::new();
-        cache.insert(
-            0,
-            CachedFeed {
-                parsed,
-                fetched_at: std::time::SystemTime::now(),
-            },
-        );
-        let entries = collect_entries(&state, &cache, &[0]);
+        cache.insert(0, CachedFeed { parsed, fetched_at: std::time::SystemTime::now() });
+        let entries = collect_entries(&feeds, &cache, &[0]);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "has link");
     }
 
     #[test]
     fn collect_entries_pulls_host_from_link() {
-        let state = fake_state(vec!["https://example.com/feed"]);
+        let feeds = vec!["https://example.com/feed".to_string()];
         let parsed = rss_with(&[
             ("a", "https://foo.example.com/path", "Mon, 01 Jan 2025 00:00:00 GMT"),
         ]);
         let mut cache = HashMap::new();
         cache.insert(0, CachedFeed { parsed, fetched_at: std::time::SystemTime::now() });
-        let entries = collect_entries(&state, &cache, &[0]);
+        let entries = collect_entries(&feeds, &cache, &[0]);
         assert_eq!(entries[0].host, "foo.example.com");
     }
 
     #[test]
     fn collect_entries_uses_feed_title_when_set() {
-        let state = fake_state(vec!["https://example.com/feed"]);
+        let feeds = vec!["https://example.com/feed".to_string()];
         let parsed = rss_with(&[
             ("a", "https://example.com/x", "Mon, 01 Jan 2025 00:00:00 GMT"),
         ]);
         let mut cache = HashMap::new();
         cache.insert(0, CachedFeed { parsed, fetched_at: std::time::SystemTime::now() });
-        let entries = collect_entries(&state, &cache, &[0]);
+        let entries = collect_entries(&feeds, &cache, &[0]);
         assert_eq!(entries[0].feed_title, "F1");
     }
 }

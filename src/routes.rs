@@ -4,10 +4,10 @@
 use std::{fmt::Write as _, sync::Arc};
 
 use axum::{
-    extract::{Path as AxumPath, Query, State},
+    extract::{Form, Path as AxumPath, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar};
@@ -16,10 +16,11 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::{
+    admin,
     extract::{extract_url, sanitize_images, BLOCKED_MARKER},
     feeds::{collect_entries, ensure_feeds, entry_full_html, item_id},
     state::AppState,
-    view::{now_secs, page, render_entries},
+    view::{now_secs, page, render_entries, url_encode},
 };
 
 #[derive(Deserialize)]
@@ -62,6 +63,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/group/{idx}", get(one_group))
         .route("/item/{iid}", get(one_item))
         .route("/settings/compact", get(set_compact))
+        .route("/admin", get(admin_index))
+        .route("/admin/feed/add", post(admin_add_feed))
+        .route("/admin/feed/remove", post(admin_remove_feed))
+        .route("/admin/group/add", post(admin_add_group))
+        .route("/admin/group/remove", post(admin_remove_group))
         .with_state(state)
 }
 
@@ -145,22 +151,28 @@ async fn all_stories(
     Query(q): Query<PageQ>,
 ) -> Html<String> {
     let bc = body_class(&jar, q.compact, state.compact_default);
-    let all_idxs: Vec<usize> = (0..state.feeds.len()).collect();
+    let feeds = state.feeds.read().await.clone();
+    let all_idxs: Vec<usize> = (0..feeds.len()).collect();
     ensure_feeds(state.clone(), &all_idxs, false).await;
     let cache = state.feed_cache.read().await;
-    let entries = collect_entries(&state, &cache, &all_idxs);
+    let entries = collect_entries(&feeds, &cache, &all_idxs);
     let body = render_entries("All stories", &entries, q.page, "/", true);
     Html(page("All stories", &body, bc))
 }
 
-async fn feeds_list(State(state): State<Arc<AppState>>, jar: CookieJar, Query(q): Query<PageQ>) -> Html<String> {
+async fn feeds_list(
+    State(state): State<Arc<AppState>>,
+    jar: CookieJar,
+    Query(q): Query<PageQ>,
+) -> Html<String> {
     let bc = body_class(&jar, q.compact, state.compact_default);
-    let all_idxs: Vec<usize> = (0..state.feeds.len()).collect();
+    let feeds = state.feeds.read().await.clone();
+    let all_idxs: Vec<usize> = (0..feeds.len()).collect();
     ensure_feeds(state.clone(), &all_idxs, false).await;
     let titles = state.feed_titles.read().await;
     let mut body = String::from("<h1>Feeds</h1><ul class='list'>");
-    for (i, url) in state.feeds.iter().enumerate() {
-        let title = titles[i].as_deref().unwrap_or(url);
+    for (i, url) in feeds.iter().enumerate() {
+        let title = titles.get(i).and_then(|t| t.as_deref()).unwrap_or(url);
         write!(
             body,
             "<li><a href='/feed/{i}'>{title}</a><div class='meta'>{url}</div></li>",
@@ -180,7 +192,8 @@ async fn one_feed(
     AxumPath(idx): AxumPath<usize>,
     Query(q): Query<PageQ>,
 ) -> Result<Html<String>, StatusCode> {
-    if idx >= state.feeds.len() {
+    let feeds = state.feeds.read().await.clone();
+    if idx >= feeds.len() {
         return Err(StatusCode::NOT_FOUND);
     }
     let bc = body_class(&jar, q.compact, state.compact_default);
@@ -189,16 +202,21 @@ async fn one_feed(
     let title = cache
         .get(&idx)
         .and_then(|c| c.parsed.title.as_ref().map(|t| t.content.clone()))
-        .unwrap_or_else(|| state.feeds[idx].clone());
-    let entries = collect_entries(&state, &cache, &[idx]);
+        .unwrap_or_else(|| feeds[idx].clone());
+    let entries = collect_entries(&feeds, &cache, &[idx]);
     let body = render_entries(&title, &entries, q.page, &format!("/feed/{}", idx), false);
     Ok(Html(page(&title, &body, bc)))
 }
 
-async fn groups_list(State(state): State<Arc<AppState>>, jar: CookieJar, Query(q): Query<PageQ>) -> Html<String> {
+async fn groups_list(
+    State(state): State<Arc<AppState>>,
+    jar: CookieJar,
+    Query(q): Query<PageQ>,
+) -> Html<String> {
     let bc = body_class(&jar, q.compact, state.compact_default);
+    let groups = state.groups.read().await.clone();
     let mut body = String::from("<h1>Groups</h1><ul class='list'>");
-    for (i, g) in state.groups.iter().enumerate() {
+    for (i, g) in groups.iter().enumerate() {
         let count = g.feed_indices.len();
         write!(
             body,
@@ -220,15 +238,18 @@ async fn one_group(
     AxumPath(idx): AxumPath<usize>,
     Query(q): Query<PageQ>,
 ) -> Result<Html<String>, StatusCode> {
-    let Some(group) = state.groups.get(idx) else {
-        return Err(StatusCode::NOT_FOUND);
+    let (name, indices) = {
+        let groups = state.groups.read().await;
+        let Some(g) = groups.get(idx) else {
+            return Err(StatusCode::NOT_FOUND);
+        };
+        (g.name.clone(), g.feed_indices.clone())
     };
     let bc = body_class(&jar, q.compact, state.compact_default);
-    let indices = group.feed_indices.clone();
-    let name = group.name.clone();
+    let feeds = state.feeds.read().await.clone();
     ensure_feeds(state.clone(), &indices, false).await;
     let cache = state.feed_cache.read().await;
-    let entries = collect_entries(&state, &cache, &indices);
+    let entries = collect_entries(&feeds, &cache, &indices);
     let body = render_entries(&name, &entries, q.page, &format!("/group/{}", idx), true);
     Ok(Html(page(&name, &body, bc)))
 }
@@ -274,7 +295,8 @@ async fn one_item(
     let (link, title, body_html) = if let Some(c) = cached {
         c
     } else {
-        let all_idxs: Vec<usize> = (0..state.feeds.len()).collect();
+        let n_feeds = state.feeds.read().await.len();
+        let all_idxs: Vec<usize> = (0..n_feeds).collect();
         ensure_feeds(state.clone(), &all_idxs, false).await;
         let found = {
             let cache = state.feed_cache.read().await;
@@ -338,6 +360,166 @@ async fn one_item(
         ],
     );
     Ok(Html(page(&title, &body, bc)))
+}
+
+// ---------------------------------------------------------------------------
+// Admin
+
+#[derive(Deserialize)]
+struct AdminQ {
+    /// Flash message shown above the form (success).
+    #[serde(default)]
+    ok: Option<String>,
+    /// Flash message shown above the form (error).
+    #[serde(default)]
+    err: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FeedForm {
+    group: String,
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct GroupForm {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct RemoveGroupForm {
+    name: String,
+}
+
+async fn admin_index(
+    State(state): State<Arc<AppState>>,
+    jar: CookieJar,
+    Query(q): Query<AdminQ>,
+) -> Result<Html<String>, StatusCode> {
+    let cfg = admin::read_config(&state).map_err(|e| {
+        tracing::error!("admin: read_config failed: {e:#}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let bc = body_class(&jar, None, state.compact_default);
+
+    let flash = match (&q.ok, &q.err) {
+        (Some(m), _) => format!("<div class='flash flash-ok'>{}</div>", encode_text(m)),
+        (_, Some(m)) => format!("<div class='flash flash-err'>{}</div>", encode_text(m)),
+        _ => String::new(),
+    };
+
+    let mut groups_html = String::new();
+    for g in &cfg.rss.groups {
+        write!(
+            groups_html,
+            "<section class='admin-group'><h2>{name}</h2>",
+            name = encode_text(&g.name)
+        )
+        .unwrap();
+        if g.feeds.is_empty() {
+            groups_html.push_str("<p class='empty'>(no feeds)</p>");
+        } else {
+            groups_html.push_str("<ul class='list'>");
+            for url in &g.feeds {
+                write!(
+                    groups_html,
+                    "<li><span class='meta'>{url}</span>\
+                     <form method='post' action='/admin/feed/remove' class='inline'>\
+                     <input type='hidden' name='group' value='{group}'>\
+                     <input type='hidden' name='url' value='{url}'>\
+                     <button type='submit'>Remove</button>\
+                     </form></li>",
+                    url = encode_text(url),
+                    group = encode_text(&g.name),
+                )
+                .unwrap();
+            }
+            groups_html.push_str("</ul>");
+        }
+        write!(
+            groups_html,
+            "<form method='post' action='/admin/feed/add' class='inline'>\
+             <input type='hidden' name='group' value='{group}'>\
+             <input type='url' name='url' placeholder='https://example.com/feed.xml' required size='40'>\
+             <button type='submit'>Add feed</button>\
+             </form>\
+             <form method='post' action='/admin/group/remove' class='inline' onsubmit=\"return confirm('Remove group {group_js} and its feeds?');\">\
+             <input type='hidden' name='name' value='{group}'>\
+             <button type='submit'>Remove group</button>\
+             </form></section>",
+            group = encode_text(&g.name),
+            group_js = encode_text(&g.name).replace('\'', ""),
+        )
+        .unwrap();
+    }
+
+    let body = crate::template::render(
+        include_str!("templates/admin.html"),
+        &[("flash", &flash), ("groups", &groups_html)],
+    );
+    Ok(Html(page("Admin", &body, bc)))
+}
+
+fn redirect_with_flash(ok: Option<&str>, err: Option<&str>) -> Redirect {
+    let mut url = String::from("/admin");
+    if let Some(m) = ok {
+        url.push_str("?ok=");
+        url.push_str(&url_encode(m));
+    } else if let Some(m) = err {
+        url.push_str("?err=");
+        url.push_str(&url_encode(m));
+    }
+    Redirect::to(&url)
+}
+
+async fn admin_add_feed(
+    State(state): State<Arc<AppState>>,
+    Form(f): Form<FeedForm>,
+) -> Redirect {
+    let group = f.group.clone();
+    let url = f.url.clone();
+    let r = admin::mutate_config(&state, |cfg| admin::add_feed_to_group(cfg, &group, &url)).await;
+    match r {
+        Ok(()) => redirect_with_flash(Some(&format!("Added {} to {}.", url, group)), None),
+        Err(e) => redirect_with_flash(None, Some(&format!("Could not add feed: {}", e))),
+    }
+}
+
+async fn admin_remove_feed(
+    State(state): State<Arc<AppState>>,
+    Form(f): Form<FeedForm>,
+) -> Redirect {
+    let group = f.group.clone();
+    let url = f.url.clone();
+    let r = admin::mutate_config(&state, |cfg| admin::remove_feed_from_group(cfg, &group, &url)).await;
+    match r {
+        Ok(()) => redirect_with_flash(Some(&format!("Removed {} from {}.", url, group)), None),
+        Err(e) => redirect_with_flash(None, Some(&format!("Could not remove feed: {}", e))),
+    }
+}
+
+async fn admin_add_group(
+    State(state): State<Arc<AppState>>,
+    Form(f): Form<GroupForm>,
+) -> Redirect {
+    let name = f.name.clone();
+    let r = admin::mutate_config(&state, |cfg| admin::add_group(cfg, &name)).await;
+    match r {
+        Ok(()) => redirect_with_flash(Some(&format!("Created group {}.", name)), None),
+        Err(e) => redirect_with_flash(None, Some(&format!("Could not create group: {}", e))),
+    }
+}
+
+async fn admin_remove_group(
+    State(state): State<Arc<AppState>>,
+    Form(f): Form<RemoveGroupForm>,
+) -> Redirect {
+    let name = f.name.clone();
+    let r = admin::mutate_config(&state, |cfg| admin::remove_group(cfg, &name)).await;
+    match r {
+        Ok(()) => redirect_with_flash(Some(&format!("Removed group {}.", name)), None),
+        Err(e) => redirect_with_flash(None, Some(&format!("Could not remove group: {}", e))),
+    }
 }
 
 #[cfg(test)]

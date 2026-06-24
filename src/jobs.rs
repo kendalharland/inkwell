@@ -51,7 +51,8 @@ pub const SCHEDULER_OWNER: &str = "inkwell-scheduler";
 /// Returns `(entries_seen, new_articles_extracted)` so the worker can log
 /// a useful summary.
 pub async fn run_refresh(state: Arc<AppState>) -> Result<(usize, usize)> {
-    let all_idxs: Vec<usize> = (0..state.feeds.len()).collect();
+    let n_feeds = state.feeds.read().await.len();
+    let all_idxs: Vec<usize> = (0..n_feeds).collect();
     ensure_feeds(state.clone(), &all_idxs, true).await;
 
     // Snapshot the work-list up front. Holding the cache read-lock across

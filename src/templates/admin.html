@@ -1,0 +1,14 @@
+<h1>Admin</h1>
+<p class="admin-warn">
+Saving rewrites <code>config.yaml</code> in place. Comments in the file
+are not preserved by the YAML serializer.
+</p>
+{{flash}}
+{{groups}}
+<section class="admin-group">
+<h2>Add a group</h2>
+<form method="post" action="/admin/group/add" class="inline">
+  <input type="text" name="name" placeholder="Group name" required>
+  <button type="submit">Add group</button>
+</form>
+</section>

@@ -20,6 +20,17 @@ img{max-width:100%;height:auto}
 pre{white-space:pre-wrap;word-wrap:break-word}
 blockquote{border-left:3px solid #888;margin:.8em 0;padding-left:.8em;color:#222}
 .err{border:2px solid #000;padding:1em;background:#eee}
+.admin-warn{background:#fff8e1;border:1px solid #c0a050;padding:.6em .9em;font-size:15px}
+.admin-group{border:1px solid #ccc;padding:.7em 1em;margin:1em 0}
+.admin-group h2{margin:0 0 .5em}
+.admin-group form.inline{display:inline-block;margin-right:.4em}
+.admin-group input[type=text],.admin-group input[type=url]{padding:.4em .6em;font-size:16px;font-family:inherit;border:1px solid #888}
+.admin-group button{padding:.4em .9em;font-size:15px;border:1px solid #555;background:#f4f4f4;cursor:pointer;font-family:inherit}
+.admin-group ul.list li{display:flex;align-items:center;gap:.7em;padding:.4em 0}
+.admin-group ul.list li .meta{flex:1;margin:0;word-break:break-all}
+.flash{padding:.6em .9em;margin:.8em 0;border:1px solid}
+.flash-ok{background:#e6f5e6;border-color:#6a8}
+.flash-err{background:#fde8e8;border-color:#c44}
 
 /* Compact density — toggled by ?compact=1 or scheduler.compact_default. */
 body.compact{font-size:17px;line-height:1.35;max-width:36em}

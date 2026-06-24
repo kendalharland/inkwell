@@ -7,21 +7,21 @@
 
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ConfigFile {
     pub rss: RssConfig,
     /// Optional. When absent the server runs as a foreground reader with no
     /// background refresh or purge. Useful for ad-hoc / one-shot use.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduler: Option<SchedulerConfig>,
     /// Optional. Layout/density preferences for the reader UI.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "ViewConfig::is_default")]
     pub view: ViewConfig,
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
 pub struct ViewConfig {
     /// When `true`, the reader renders the compact (denser) layout by
     /// default. Users can override per-session via the nav toggle, which
@@ -30,18 +30,24 @@ pub struct ViewConfig {
     pub compact_default: bool,
 }
 
-#[derive(Debug, Deserialize)]
+impl ViewConfig {
+    fn is_default(&self) -> bool {
+        *self == ViewConfig::default()
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RssConfig {
     pub groups: Vec<GroupConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct GroupConfig {
     pub name: String,
     pub feeds: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SchedulerConfig {
     /// Cron expression for the feed-refresh + pre-extract job.
     pub refresh: String,

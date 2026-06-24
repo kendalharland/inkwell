@@ -5,6 +5,7 @@
 
 use std::{
     collections::HashMap,
+    path::PathBuf,
     time::{Duration, SystemTime},
 };
 
@@ -14,6 +15,7 @@ use tokio::sync::{Mutex, RwLock};
 /// One configured group. `feed_indices` point into `AppState::feeds` —
 /// indices, not URL strings, so a feed listed in multiple groups still
 /// maps to one cache entry.
+#[derive(Clone)]
 pub struct GroupInfo {
     pub name: String,
     pub feed_indices: Vec<usize>,
@@ -29,13 +31,17 @@ pub struct CachedFeed {
 
 pub struct AppState {
     /// Deduplicated list of feed URLs. Group-to-feed mapping is by index
-    /// into this vector. Stable for the process lifetime — never resized.
-    pub feeds: Vec<String>,
+    /// into this vector. Mutable to support the admin UI (#3) — wrapped
+    /// in `RwLock` so live mutations can hot-swap the list without
+    /// restarting the server.
+    pub feeds: RwLock<Vec<String>>,
     /// Display titles parsed from the feed payload (Atom/RSS `<title>`).
     /// Populated lazily as feeds are fetched. `None` slots fall back to
-    /// the URL in `feeds`.
+    /// the URL in `feeds`. Aligned 1:1 with `feeds`.
     pub feed_titles: RwLock<Vec<Option<String>>>,
-    pub groups: Vec<GroupInfo>,
+    /// Groups carry indices into `feeds`. Mutable alongside `feeds`; the
+    /// admin reload-helper rebuilds both atomically.
+    pub groups: RwLock<Vec<GroupInfo>>,
     pub http: reqwest::Client,
     /// Parsed-feed cache keyed by feed index. Eviction is purely TTL-based.
     pub feed_cache: RwLock<HashMap<usize, CachedFeed>>,
@@ -49,5 +55,10 @@ pub struct AppState {
     /// Default for the compact-density UI when neither a cookie nor a
     /// query-string override is present on the request.
     pub compact_default: bool,
+    /// Path of the YAML config file. The admin UI rewrites this file in
+    /// place when feeds or groups change, then hot-reloads the live
+    /// state. Comments in the original YAML are not preserved on
+    /// rewrite — surfaced in the admin UI as a warning.
+    pub config_path: PathBuf,
 }
 
