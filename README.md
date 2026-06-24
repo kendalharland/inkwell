@@ -146,18 +146,6 @@ src/
 
 Run `cargo test` for the unit-test suite (no network, no fixtures).
 
-## Roadmap / open issues
-
-* [#2][issue-2] — Serve the Gemini protocol alongside HTTP.
-* [#3][issue-3] — Simple web UI for managing feeds at runtime.
-* [#7][issue-7] — Codeberg Pages reference documentation site.
-* [#8][issue-8] — Device-pairing flow (short codes instead of typed passwords on the Kindle).
-
-[issue-2]: https://codeberg.org/kendal/inkwell/issues/2
-[issue-3]: https://codeberg.org/kendal/inkwell/issues/3
-[issue-7]: https://codeberg.org/kendal/inkwell/issues/7
-[issue-8]: https://codeberg.org/kendal/inkwell/issues/8
-
 ## License
 
 MIT or Apache-2.0 — at your option. Files do not yet carry license
