@@ -1,10 +1,10 @@
 [package]
-name = "inkwell"
+name = "inkfeed"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "inkwell"
+name = "inkfeed"
 path = "src/main.rs"
 
 [dependencies]

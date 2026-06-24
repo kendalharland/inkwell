@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# Single-binary inkwell image. Multi-stage; the runtime image carries
+# Single-binary inkfeed image. Multi-stage; the runtime image carries
 # only the binary plus ca-certificates (needed for outbound HTTPS to
 # feed sources). SQLite is statically linked via rusqlite's `bundled`
 # feature and TLS goes through rustls+ring, so the runtime image needs
@@ -28,7 +28,7 @@ COPY src ./src
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked && \
-    cp /src/target/release/inkwell /tmp/inkwell
+    cp /src/target/release/inkfeed /tmp/inkfeed
 
 # ---- runtime ---------------------------------------------------------------
 
@@ -38,18 +38,18 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
-    groupadd --system --gid 10001 inkwell && \
-    useradd --system --uid 10001 --gid inkwell --home-dir /app --shell /usr/sbin/nologin inkwell
+    groupadd --system --gid 10001 inkfeed && \
+    useradd --system --uid 10001 --gid inkfeed --home-dir /app --shell /usr/sbin/nologin inkfeed
 
 WORKDIR /app
 
-COPY --from=builder /tmp/inkwell /usr/local/bin/inkwell
+COPY --from=builder /tmp/inkfeed /usr/local/bin/inkfeed
 COPY config.docker.yaml /app/config.yaml
 
 # /data holds the SQLite cache, log file, and (if Gemini is enabled in
 # the mounted config) the TLS cert + key. Mount a host directory or
 # named volume here to persist across container recreations.
-RUN mkdir -p /data && chown -R inkwell:inkwell /app /data
+RUN mkdir -p /data && chown -R inkfeed:inkfeed /app /data
 VOLUME ["/data"]
 
 # PORT controls the HTTP listen port and defaults to 8080 in this image.
@@ -60,7 +60,7 @@ ENV PORT=8080 \
 
 EXPOSE 8080
 
-USER inkwell
+USER inkfeed
 
-ENTRYPOINT ["/usr/local/bin/inkwell"]
+ENTRYPOINT ["/usr/local/bin/inkfeed"]
 CMD ["/app/config.yaml"]

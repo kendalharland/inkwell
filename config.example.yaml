@@ -22,7 +22,7 @@ scheduler:
   purge: "0 3 * * *"
   article_ttl_days: 30
   # Errors and job activity are appended here. Created if missing.
-  log_file: ./inkwell.log
+  log_file: ./inkfeed.log
 
 # Optional. UI density.
 view:

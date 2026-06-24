@@ -1104,7 +1104,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "inkwell"
+name = "inkfeed"
 version = "0.1.0"
 dependencies = [
  "anyhow",

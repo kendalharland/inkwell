@@ -1,4 +1,4 @@
-# inkwell
+# inkfeed
 
 A small self-hosted RSS/Atom reader that serves articles as plain HTML
 suited to the **built-in browser on a Kindle** (or any other e-ink
@@ -7,7 +7,7 @@ article so taps render in a few milliseconds.
 
 ```
 ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│  RSS / Atom URLs │ →  │  inkwell server  │ →  │  Kindle browser  │
+│  RSS / Atom URLs │ →  │  inkfeed server  │ →  │  Kindle browser  │
 │  (config.yaml)   │    │  HTTP, port 5050 │    │  http://host:5050│
 └──────────────────┘    └──────────────────┘    └──────────────────┘
                              │
@@ -23,7 +23,7 @@ article so taps render in a few milliseconds.
 
 Reading on a Kindle is great. Reading *the modern web* on a Kindle is
 not — heavy JavaScript, paywall walls, slow loads, broken layouts.
-inkwell sits between your RSS feeds and your e-reader and serves a
+inkfeed sits between your RSS feeds and your e-reader and serves a
 single, predictable HTML shape that every Kindle browser can render.
 
 ## Install
@@ -36,14 +36,14 @@ cd inkfeed
 cargo build --release
 ```
 
-The binary is `./target/release/inkwell`.
+The binary is `./target/release/inkfeed`.
 
 ## Quick start
 
 ```sh
 cp config.example.yaml config.yaml
 # edit config.yaml — add feeds, groups, and (optionally) a scheduler block
-./target/release/inkwell config.yaml
+./target/release/inkfeed config.yaml
 ```
 
 The server listens on `0.0.0.0:5050`. From your Kindle, browse to
@@ -67,7 +67,7 @@ scheduler:
   refresh: "@every 10m"      # cron or "@every Ns"
   purge: "0 3 * * *"         # 5-field cron, also accepts 6-field with leading seconds
   article_ttl_days: 30
-  log_file: ./inkwell.log
+  log_file: ./inkfeed.log
 
 # Optional. UI density.
 view:
@@ -120,11 +120,11 @@ replaced with a `[alt text]` fallback. See [#1][issue-1] for the rationale.
 
 ## Connect from your usual RSS reader
 
-inkwell consumes RSS — it does not currently re-expose RSS for other
+inkfeed consumes RSS — it does not currently re-expose RSS for other
 readers. Any standalone reader (NetNewsWire, Reeder, FreshRSS, etc.)
 can subscribe to the **same source URLs** you put in `config.yaml`.
 
-If you'd like inkwell to also serve outbound feeds, weigh in on an
+If you'd like inkfeed to also serve outbound feeds, weigh in on an
 issue.
 
 ## Layout / structure
