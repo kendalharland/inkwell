@@ -53,7 +53,7 @@ async fn all_stories(State(state): State<Arc<AppState>>, Query(q): Query<PageQ>)
     let cache = state.feed_cache.read().await;
     let entries = collect_entries(&state, &cache, &all_idxs);
     let body = render_entries("All stories", &entries, q.page, "/", true);
-    Html(page("All stories", &body))
+    Html(page("All stories", &body, ""))
 }
 
 async fn feeds_list(State(state): State<Arc<AppState>>) -> Html<String> {
@@ -73,7 +73,7 @@ async fn feeds_list(State(state): State<Arc<AppState>>) -> Html<String> {
         .unwrap();
     }
     body.push_str("</ul>");
-    Html(page("Feeds", &body))
+    Html(page("Feeds", &body, ""))
 }
 
 async fn one_feed(
@@ -92,7 +92,7 @@ async fn one_feed(
         .unwrap_or_else(|| state.feeds[idx].clone());
     let entries = collect_entries(&state, &cache, &[idx]);
     let body = render_entries(&title, &entries, q.page, &format!("/feed/{}", idx), false);
-    Ok(Html(page(&title, &body)))
+    Ok(Html(page(&title, &body, "")))
 }
 
 async fn groups_list(State(state): State<Arc<AppState>>) -> Html<String> {
@@ -110,7 +110,7 @@ async fn groups_list(State(state): State<Arc<AppState>>) -> Html<String> {
         .unwrap();
     }
     body.push_str("</ul>");
-    Html(page("Groups", &body))
+    Html(page("Groups", &body, ""))
 }
 
 async fn one_group(
@@ -127,7 +127,7 @@ async fn one_group(
     let cache = state.feed_cache.read().await;
     let entries = collect_entries(&state, &cache, &indices);
     let body = render_entries(&name, &entries, q.page, &format!("/group/{}", idx), true);
-    Ok(Html(page(&name, &body)))
+    Ok(Html(page(&name, &body, "")))
 }
 
 /// Article render. Tries the persistent SQLite cache first (so a feed that
@@ -219,14 +219,15 @@ async fn one_item(
         .ok()
         .and_then(|u| u.host_str().map(|s| s.to_string()))
         .unwrap_or_default();
-    let body = format!(
-        "<h1>{title}</h1><div class='meta'><a href='{link}'>{host}</a></div>{body}\
-         <div class='actions'><a class='btn' href='{back}'>Back</a></div>",
-        title = encode_text(&title),
-        link = encode_text(&link),
-        host = encode_text(&host),
-        body = body_html,
-        back = encode_text(&back),
+    let body = crate::template::render(
+        include_str!("templates/item.html"),
+        &[
+            ("title", &encode_text(&title)),
+            ("link", &encode_text(&link)),
+            ("host", &encode_text(&host)),
+            ("body", &body_html),
+            ("back", &encode_text(&back)),
+        ],
     );
-    Ok(Html(page(&title, &body)))
+    Ok(Html(page(&title, &body, "")))
 }

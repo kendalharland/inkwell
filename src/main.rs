@@ -24,6 +24,7 @@ mod jobs;
 mod logging;
 mod routes;
 mod state;
+mod template;
 mod view;
 
 use std::{

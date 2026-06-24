@@ -1,9 +1,13 @@
 //! HTML rendering for Kindle: page wrapper, listings, pagination.
 //!
-//! Markup is intentionally inlined as `format!` strings rather than a
-//! templating engine. The Kindle browser is unforgiving and the markup
-//! surface is small enough that a template language would be more friction
-//! than the variable interpolation it would save.
+//! Markup lives in `src/templates/*.html` and is `include_str!`'d into the
+//! binary at compile time, then expanded with [`crate::template::render`]
+//! (a tiny single-pass `{{var}}` substituter — no template engine).
+//!
+//! Keeping the markup in dedicated files makes it scannable at a glance
+//! and lets editor HTML tooling work on it. The `render` helper does a
+//! single substitution pass so a value that itself contains `{{...}}`
+//! cannot trigger nested expansion.
 
 use std::{
     fmt::Write as _,
@@ -12,37 +16,13 @@ use std::{
 
 use html_escape::encode_text;
 
-use crate::feeds::EntryView;
+use crate::{feeds::EntryView, template::render};
 
 pub const PAGE_SIZE: usize = 25;
 
-/// All inline CSS used by the reader. One file's worth, copied into every
-/// response so the Kindle browser never has to do a second roundtrip just
-/// for styles. Targets a font-size and column width that match the device's
-/// physical screen comfortably.
-pub const STYLE: &str = r#"
-body{font-family:Georgia,serif;font-size:20px;line-height:1.5;max-width:40em;
-margin:1em auto;padding:0 1em;color:#000;background:#fff}
-a{color:#000}
-nav{border-bottom:2px solid #000;padding-bottom:.5em;margin-bottom:1em;font-size:17px}
-nav a{margin-right:1.2em;text-decoration:none}
-h1{font-size:26px;margin:.5em 0}
-h2{font-size:22px}
-ul.list{list-style:none;padding:0;margin:0}
-ul.list li{border-bottom:1px solid #888;padding:.9em 0}
-ul.list a{display:block;font-size:22px;text-decoration:none}
-.meta{color:#444;font-size:15px;margin-top:.2em}
-.empty{padding:2em 0;color:#555}
-.actions{margin:2em 0 4em;padding-top:1em;border-top:2px solid #000}
-.actions a.btn,.pager a{display:inline-block;padding:.7em 1.2em;border:2px solid #000;
-background:#fff;font-size:18px;margin:.3em .3em 0 0;text-decoration:none;color:#000}
-.pager{margin:1em 0 2em}
-.pager span{margin:0 .5em;font-size:16px}
-img{max-width:100%;height:auto}
-pre{white-space:pre-wrap;word-wrap:break-word}
-blockquote{border-left:3px solid #888;margin:.8em 0;padding-left:.8em;color:#222}
-.err{border:2px solid #000;padding:1em;background:#eee}
-"#;
+pub const STYLE: &str = include_str!("templates/style.css");
+const PAGE_TEMPLATE: &str = include_str!("templates/page.html");
+const LISTING_TEMPLATE: &str = include_str!("templates/listing.html");
 
 pub fn url_encode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
@@ -56,21 +36,18 @@ pub fn now_secs() -> i64 {
 }
 
 /// Outer chrome — `<head>`, top nav, body wrapper. Every route returns
-/// this around its content.
-pub fn page(title: &str, body: &str) -> String {
-    format!(
-        "<!DOCTYPE html><html><head>\
-         <meta charset=\"utf-8\">\
-         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-         <title>{title}</title><style>{style}</style></head>\
-         <body><nav>\
-         <a href='/'>All stories</a> \
-         <a href='/feeds'>Feeds</a> \
-         <a href='/groups'>Groups</a>\
-         </nav>{body}</body></html>",
-        title = encode_text(title),
-        style = STYLE,
-        body = body,
+/// this around its content. `body_class` is interpolated into the
+/// `<body class=...>` attribute so layout-density variants (compact mode)
+/// can be toggled without re-rendering everything.
+pub fn page(title: &str, body: &str, body_class: &str) -> String {
+    render(
+        PAGE_TEMPLATE,
+        &[
+            ("title", &encode_text(title)),
+            ("style", STYLE),
+            ("body_class", body_class),
+            ("body", body),
+        ],
     )
 }
 
@@ -94,12 +71,18 @@ pub fn render_entries(
     let start = (page_num - 1) * PAGE_SIZE;
     let end = (start + PAGE_SIZE).min(total);
 
-    let mut body = format!("<h1>{}</h1>", encode_text(title));
     if entries.is_empty() {
-        body.push_str("<div class='empty'>No items.</div>");
-        return body;
+        return render(
+            LISTING_TEMPLATE,
+            &[
+                ("title", &encode_text(title)),
+                ("items", "<div class='empty'>No items.</div>"),
+                ("pager", ""),
+            ],
+        );
     }
-    body.push_str("<ul class='list'>");
+
+    let mut items = String::from("<ul class='list'>");
     let from = format!("{}?page={}", base_path, page_num);
     let from_enc = url_encode(&from);
     for e in &entries[start..end] {
@@ -109,7 +92,7 @@ pub fn render_entries(
             String::new()
         };
         write!(
-            body,
+            items,
             "<li><a href='/item/{iid}?from={from}'>{title}</a>\
              <div class='meta'>{host}{source}</div></li>",
             iid = e.iid,
@@ -120,31 +103,31 @@ pub fn render_entries(
         )
         .unwrap();
     }
-    body.push_str("</ul>");
-    if total_pages > 1 {
-        body.push_str("<div class='pager'>");
+    items.push_str("</ul>");
+
+    let pager = if total_pages > 1 {
+        let mut p = String::from("<div class='pager'>");
         if page_num > 1 {
-            write!(
-                body,
-                "<a href='{base}?page={p}'>Previous</a>",
-                base = base_path,
-                p = page_num - 1
-            )
-            .unwrap();
+            write!(p, "<a href='{}?page={}'>Previous</a>", base_path, page_num - 1).unwrap();
         }
-        write!(body, "<span>Page {} of {}</span>", page_num, total_pages).unwrap();
+        write!(p, "<span>Page {} of {}</span>", page_num, total_pages).unwrap();
         if page_num < total_pages {
-            write!(
-                body,
-                "<a href='{base}?page={p}'>Next</a>",
-                base = base_path,
-                p = page_num + 1
-            )
-            .unwrap();
+            write!(p, "<a href='{}?page={}'>Next</a>", base_path, page_num + 1).unwrap();
         }
-        body.push_str("</div>");
-    }
-    body
+        p.push_str("</div>");
+        p
+    } else {
+        String::new()
+    };
+
+    render(
+        LISTING_TEMPLATE,
+        &[
+            ("title", &encode_text(title)),
+            ("items", &items),
+            ("pager", &pager),
+        ],
+    )
 }
 
 #[cfg(test)]
@@ -169,7 +152,7 @@ mod tests {
 
     #[test]
     fn page_includes_top_nav() {
-        let p = page("X", "<p>hi</p>");
+        let p = page("X", "<p>hi</p>", "");
         assert!(p.contains("All stories"));
         assert!(p.contains("/feeds"));
         assert!(p.contains("/groups"));
@@ -178,9 +161,15 @@ mod tests {
 
     #[test]
     fn page_escapes_title() {
-        let p = page("<script>", "");
-        assert!(!p.contains("<script>"));
+        let p = page("<script>", "", "");
+        assert!(!p.contains("<title><script>"));
         assert!(p.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn page_passes_body_class_through() {
+        let p = page("X", "", "compact");
+        assert!(p.contains(r#"<body class="compact""#));
     }
 
     #[test]
@@ -192,7 +181,9 @@ mod tests {
 
     #[test]
     fn render_entries_no_pager_on_single_page() {
-        let entries: Vec<_> = (0..PAGE_SIZE).map(|i| ev(&format!("{:016x}", i), &format!("t{}", i), i as i64)).collect();
+        let entries: Vec<_> = (0..PAGE_SIZE)
+            .map(|i| ev(&format!("{:016x}", i), &format!("t{}", i), i as i64))
+            .collect();
         let out = render_entries("All", &entries, 1, "/", true);
         assert!(!out.contains("class='pager'"));
         assert!(out.contains("t0"));
@@ -223,8 +214,9 @@ mod tests {
 
     #[test]
     fn render_entries_clamps_oversize_page() {
-        let entries: Vec<_> = (0..3).map(|i| ev(&format!("{:016x}", i), &format!("t{}", i), i as i64)).collect();
-        // Asking for page 99 of a 1-page list should render page 1.
+        let entries: Vec<_> = (0..3)
+            .map(|i| ev(&format!("{:016x}", i), &format!("t{}", i), i as i64))
+            .collect();
         let out = render_entries("All", &entries, 99, "/", false);
         assert!(out.contains("t0"));
         assert!(out.contains("t2"));

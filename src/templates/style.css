@@ -1,0 +1,31 @@
+body{font-family:Georgia,serif;font-size:20px;line-height:1.5;max-width:40em;
+margin:1em auto;padding:0 1em;color:#000;background:#fff}
+a{color:#000}
+nav{border-bottom:2px solid #000;padding-bottom:.5em;margin-bottom:1em;font-size:17px}
+nav a{margin-right:1.2em;text-decoration:none}
+h1{font-size:26px;margin:.5em 0}
+h2{font-size:22px}
+ul.list{list-style:none;padding:0;margin:0}
+ul.list li{border-bottom:1px solid #888;padding:.9em 0}
+ul.list a{display:block;font-size:22px;text-decoration:none}
+.meta{color:#444;font-size:15px;margin-top:.2em}
+.empty{padding:2em 0;color:#555}
+.actions{margin:2em 0 4em;padding-top:1em;border-top:2px solid #000}
+.actions a.btn,.pager a{display:inline-block;padding:.7em 1.2em;border:2px solid #000;
+background:#fff;font-size:18px;margin:.3em .3em 0 0;text-decoration:none;color:#000}
+.pager{margin:1em 0 2em}
+.pager span{margin:0 .5em;font-size:16px}
+img{max-width:100%;height:auto}
+pre{white-space:pre-wrap;word-wrap:break-word}
+blockquote{border-left:3px solid #888;margin:.8em 0;padding-left:.8em;color:#222}
+.err{border:2px solid #000;padding:1em;background:#eee}
+
+/* Compact density — toggled by ?compact=1 or scheduler.compact_default. */
+body.compact{font-size:17px;line-height:1.35;max-width:36em}
+body.compact h1{font-size:22px}
+body.compact h2{font-size:19px}
+body.compact nav{font-size:15px}
+body.compact ul.list li{padding:.45em 0}
+body.compact ul.list a{font-size:18px}
+body.compact .meta{font-size:13px}
+body.compact .pager a,body.compact .actions a.btn{padding:.45em .9em;font-size:16px}
