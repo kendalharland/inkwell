@@ -1010,6 +1010,7 @@ dependencies = [
  "html-escape",
  "mediatype",
  "readability",
+ "regex",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",

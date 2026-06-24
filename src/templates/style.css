@@ -16,6 +16,7 @@ background:#fff;font-size:18px;margin:.3em .3em 0 0;text-decoration:none;color:#
 .pager{margin:1em 0 2em}
 .pager span{margin:0 .5em;font-size:16px}
 img{max-width:100%;height:auto}
+.img-fallback{font-style:italic;color:#333;border:1px solid #aaa;padding:.4em .8em;display:block;margin:.6em 0;background:#f4f4f4}
 pre{white-space:pre-wrap;word-wrap:break-word}
 blockquote{border-left:3px solid #888;margin:.8em 0;padding-left:.8em;color:#222}
 .err{border:2px solid #000;padding:1em;background:#eee}

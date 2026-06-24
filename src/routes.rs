@@ -16,7 +16,7 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::{
-    extract::{extract_url, BLOCKED_MARKER},
+    extract::{extract_url, sanitize_images, BLOCKED_MARKER},
     feeds::{collect_entries, ensure_feeds, entry_full_html, item_id},
     state::AppState,
     view::{now_secs, page, render_entries},
@@ -305,8 +305,11 @@ async fn one_item(
             found
         };
         let (link, title, full) = found.ok_or(StatusCode::NOT_FOUND)?;
+        // Sanitize either path: the live extractor does its own pass, but
+        // feed-provided full HTML can carry WebP/AVIF/SVG too. The
+        // sanitizer is idempotent.
         let extracted = if let Some(h) = full {
-            h
+            sanitize_images(&h)
         } else {
             extract_url(&state.http, &link).await
         };

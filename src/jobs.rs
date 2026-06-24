@@ -32,7 +32,7 @@ use anyhow::{Context, Result};
 use tokio::sync::Mutex;
 
 use crate::{
-    extract::{extract_url, BLOCKED_MARKER},
+    extract::{extract_url, sanitize_images, BLOCKED_MARKER},
     feeds::{ensure_feeds, entry_full_html, item_id},
     state::AppState,
     view::now_secs,
@@ -97,7 +97,7 @@ pub async fn run_refresh(state: Arc<AppState>) -> Result<(usize, usize)> {
             continue;
         }
         let html = if let Some(h) = full {
-            h
+            sanitize_images(&h)
         } else {
             extract_url(&state.http, &link).await
         };
