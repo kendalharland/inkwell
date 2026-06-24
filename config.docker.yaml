@@ -21,7 +21,7 @@ scheduler:
   refresh: "@every 10m"
   purge: "0 3 * * *"
   article_ttl_days: 30
-  log_file: /data/inkfeed.log
+  log_file: /data/inkwell.log
 
 view:
   compact_default: false

@@ -10,7 +10,7 @@
 /reader_cache.sqlite-journal
 /reader_cache.sqlite-wal
 /reader_cache.sqlite-shm
-/inkfeed.log
+/inkwell.log
 /gemini.cert.pem
 /gemini.key.pem
 /.env

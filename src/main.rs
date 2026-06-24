@@ -1,4 +1,4 @@
-//! # inkfeed
+//! # inkwell
 //!
 //! Kindle-friendly reader for RSS/Atom feeds, with an optional honker-backed
 //! cron scheduler that pre-extracts articles so taps render instantly.
@@ -57,7 +57,7 @@ use crate::{
 async fn main() -> Result<()> {
     let config_path: PathBuf = std::env::args()
         .nth(1)
-        .context("usage: inkfeed <config.yaml>")?
+        .context("usage: inkwell <config.yaml>")?
         .into();
     let config_str = std::fs::read_to_string(&config_path)
         .with_context(|| format!("reading {}", config_path.display()))?;
@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(15);
     let http = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; inkfeed-rss-reader/0.1)")
+        .user_agent("Mozilla/5.0 (compatible; inkwell-rss-reader/0.1)")
         .timeout(Duration::from_secs(timeout_secs))
         .build()?;
 
@@ -144,7 +144,7 @@ async fn main() -> Result<()> {
         );
 
         // Leader-elected scheduler ticker. Blocking loop; runs forever in
-        // its own OS thread via spawn_blocking. Other inkfeed instances
+        // its own OS thread via spawn_blocking. Other inkwell instances
         // against the same DB will see this lock and stay idle.
         {
             let db = db.clone();

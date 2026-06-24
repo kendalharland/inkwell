@@ -1,10 +1,10 @@
 [package]
-name = "inkfeed"
+name = "inkwell"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "inkfeed"
+name = "inkwell"
 path = "src/main.rs"
 
 [dependencies]
@@ -20,7 +20,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-pemfile = "2"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 scraper = "0.20"
-readability = "0.3"
+readability = { version = "0.3", default-features = false }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
 rusqlite = { version = "0.39", features = ["bundled"] }

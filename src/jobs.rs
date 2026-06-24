@@ -9,7 +9,7 @@
 //!   docstring), so even without the explicit remove the worst case is a
 //!   no-op.
 //! * **No double scheduling across instances.** `Scheduler::run` performs
-//!   SQLite-level leader election with a 60s lock TTL — running two inkfeed
+//!   SQLite-level leader election with a 60s lock TTL — running two inkwell
 //!   processes against the same DB is safe; only one fires schedules. The
 //!   leader entry is visible in `_honker_locks`.
 //! * **No backlog pile-up.** `worker_loop` claims jobs in batches and
@@ -38,11 +38,11 @@ use crate::{
     view::now_secs,
 };
 
-pub const REFRESH_SCHEDULE_NAME: &str = "inkfeed.refresh";
-pub const REFRESH_QUEUE_NAME: &str = "inkfeed.refresh";
-pub const PURGE_SCHEDULE_NAME: &str = "inkfeed.purge";
-pub const PURGE_QUEUE_NAME: &str = "inkfeed.purge";
-pub const SCHEDULER_OWNER: &str = "inkfeed-scheduler";
+pub const REFRESH_SCHEDULE_NAME: &str = "inkwell.refresh";
+pub const REFRESH_QUEUE_NAME: &str = "inkwell.refresh";
+pub const PURGE_SCHEDULE_NAME: &str = "inkwell.purge";
+pub const PURGE_QUEUE_NAME: &str = "inkwell.purge";
+pub const SCHEDULER_OWNER: &str = "inkwell-scheduler";
 
 /// Force-refresh every feed (ignoring per-feed TTL), then for every entry
 /// not already in the SQLite article cache, run the full
@@ -145,7 +145,7 @@ pub async fn worker_loop<F, Fut>(
     F: Fn(Arc<AppState>) -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = Result<String>> + Send,
 {
-    let worker_id = format!("inkfeed.{}.0", label);
+    let worker_id = format!("inkwell.{}.0", label);
     while !stop.load(Ordering::Relaxed) {
         let q = queue.clone();
         let wid = worker_id.clone();

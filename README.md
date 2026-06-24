@@ -1,4 +1,4 @@
-# inkfeed
+# inkwell
 
 A small self-hosted RSS/Atom reader that serves articles as plain HTML
 suited to the **built-in browser on a Kindle** (or any other e-ink
@@ -7,7 +7,7 @@ article so taps render in a few milliseconds.
 
 ```
 ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│  RSS / Atom URLs │ →  │  inkfeed server  │ →  │  Kindle browser  │
+│  RSS / Atom URLs │ →  │  inkwell server  │ →  │  Kindle browser  │
 │  (config.yaml)   │    │  HTTP, port 5050 │    │  http://host:5050│
 └──────────────────┘    └──────────────────┘    └──────────────────┘
                              │
@@ -17,13 +17,13 @@ article so taps render in a few milliseconds.
 
 > Screenshot — TODO (tracked in [#4][issue-4]).
 
-[issue-4]: https://codeberg.org/kendal/inkfeed/issues/4
+[issue-4]: https://codeberg.org/kendal/inkwell/issues/4
 
 ## Why
 
 Reading on a Kindle is great. Reading *the modern web* on a Kindle is
 not — heavy JavaScript, paywall walls, slow loads, broken layouts.
-inkfeed sits between your RSS feeds and your e-reader and serves a
+inkwell sits between your RSS feeds and your e-reader and serves a
 single, predictable HTML shape that every Kindle browser can render.
 
 ## Install
@@ -31,19 +31,19 @@ single, predictable HTML shape that every Kindle browser can render.
 You need a Rust toolchain (1.80+).
 
 ```sh
-git clone https://codeberg.org/kendal/inkfeed.git
-cd inkfeed
+git clone https://codeberg.org/kendal/inkwell.git
+cd inkwell
 cargo build --release
 ```
 
-The binary is `./target/release/inkfeed`.
+The binary is `./target/release/inkwell`.
 
 ## Quick start
 
 ```sh
 cp config.example.yaml config.yaml
 # edit config.yaml — add feeds, groups, and (optionally) a scheduler block
-./target/release/inkfeed config.yaml
+./target/release/inkwell config.yaml
 ```
 
 The server listens on `0.0.0.0:5050`. From your Kindle, browse to
@@ -67,7 +67,7 @@ scheduler:
   refresh: "@every 10m"      # cron or "@every Ns"
   purge: "0 3 * * *"         # 5-field cron, also accepts 6-field with leading seconds
   article_ttl_days: 30
-  log_file: ./inkfeed.log
+  log_file: ./inkwell.log
 
 # Optional. UI density.
 view:
@@ -116,15 +116,15 @@ Images are sanitized for the Kindle browser — JPEG/PNG/GIF are kept (with
 an empty `alt=""` added when missing); WebP/AVIF/SVG/data-URIs are
 replaced with a `[alt text]` fallback. See [#1][issue-1] for the rationale.
 
-[issue-1]: https://codeberg.org/kendal/inkfeed/issues/1
+[issue-1]: https://codeberg.org/kendal/inkwell/issues/1
 
 ## Connect from your usual RSS reader
 
-inkfeed consumes RSS — it does not currently re-expose RSS for other
+inkwell consumes RSS — it does not currently re-expose RSS for other
 readers. Any standalone reader (NetNewsWire, Reeder, FreshRSS, etc.)
 can subscribe to the **same source URLs** you put in `config.yaml`.
 
-If you'd like inkfeed to also serve outbound feeds, weigh in on an
+If you'd like inkwell to also serve outbound feeds, weigh in on an
 issue.
 
 ## Layout / structure
@@ -153,10 +153,10 @@ Run `cargo test` for the unit-test suite (no network, no fixtures).
 * [#7][issue-7] — Codeberg Pages reference documentation site.
 * [#8][issue-8] — Device-pairing flow (short codes instead of typed passwords on the Kindle).
 
-[issue-2]: https://codeberg.org/kendal/inkfeed/issues/2
-[issue-3]: https://codeberg.org/kendal/inkfeed/issues/3
-[issue-7]: https://codeberg.org/kendal/inkfeed/issues/7
-[issue-8]: https://codeberg.org/kendal/inkfeed/issues/8
+[issue-2]: https://codeberg.org/kendal/inkwell/issues/2
+[issue-3]: https://codeberg.org/kendal/inkwell/issues/3
+[issue-7]: https://codeberg.org/kendal/inkwell/issues/7
+[issue-8]: https://codeberg.org/kendal/inkwell/issues/8
 
 ## License
 
