@@ -16,6 +16,18 @@ pub struct ConfigFile {
     /// background refresh or purge. Useful for ad-hoc / one-shot use.
     #[serde(default)]
     pub scheduler: Option<SchedulerConfig>,
+    /// Optional. Layout/density preferences for the reader UI.
+    #[serde(default)]
+    pub view: ViewConfig,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct ViewConfig {
+    /// When `true`, the reader renders the compact (denser) layout by
+    /// default. Users can override per-session via the nav toggle, which
+    /// stores their choice in a cookie.
+    #[serde(default)]
+    pub compact_default: bool,
 }
 
 #[derive(Debug, Deserialize)]

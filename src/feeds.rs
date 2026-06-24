@@ -259,6 +259,7 @@ mod tests {
             db: tokio::sync::Mutex::new(rusqlite::Connection::open_in_memory().unwrap()),
             feed_ttl: std::time::Duration::from_secs(60),
             article_ttl_secs: 86400,
+            compact_default: false,
         }
     }
 

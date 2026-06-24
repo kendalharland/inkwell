@@ -46,5 +46,8 @@ pub struct AppState {
     /// Pre-computed `article_ttl_days * 86400` so the purge job can do
     /// arithmetic without re-reading config.
     pub article_ttl_secs: i64,
+    /// Default for the compact-density UI when neither a cookie nor a
+    /// query-string override is present on the request.
+    pub compact_default: bool,
 }
 

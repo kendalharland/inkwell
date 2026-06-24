@@ -139,6 +139,7 @@ async fn main() -> Result<()> {
         db: Mutex::new(conn),
         feed_ttl,
         article_ttl_secs,
+        compact_default: config.view.compact_default,
     });
 
     // ---------- scheduler / workers ----------------------------------------
