@@ -294,6 +294,7 @@ mod tests {
             scheduler: None,
             view: ViewConfig::default(),
             gemini: None,
+            feed_search: crate::config::FeedSearchConfig::default(),
         }
     }
 

@@ -57,5 +57,9 @@ pub struct AppState {
     /// Default for the dark-theme variant. Same precedence rules as
     /// `compact_default`.
     pub dark_default: bool,
+    /// Feed-discovery providers, copied off the config at startup.
+    /// Read by the admin autocomplete endpoint to know which third
+    /// parties to fan out to.
+    pub feed_search: crate::config::FeedSearchConfig,
 }
 

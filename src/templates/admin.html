@@ -8,3 +8,41 @@
   <button type="submit">Add group</button>
 </form>
 </section>
+<datalist id="feed-suggestions"></datalist>
+<script>
+// Bind every group's "Add feed" input to the shared <datalist> and
+// query /admin/feed-search as the user types. 250ms debounce keeps us
+// off the wire while they're still typing; <3 chars short-circuits.
+(function () {
+  var timer;
+  var dl = document.getElementById('feed-suggestions');
+
+  function update(query) {
+    fetch('/admin/feed-search?q=' + encodeURIComponent(query))
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (items) {
+        dl.innerHTML = '';
+        items.forEach(function (it) {
+          var opt = document.createElement('option');
+          opt.value = it.url;
+          opt.label = it.title || it.url;
+          dl.appendChild(opt);
+        });
+      })
+      .catch(function () { /* network errors: leave the list as-is */ });
+  }
+
+  function onInput(e) {
+    clearTimeout(timer);
+    var q = e.target.value.trim();
+    if (q.length < 3) { return; }
+    timer = setTimeout(function () { update(q); }, 250);
+  }
+
+  document.querySelectorAll('input[name="url"]').forEach(function (inp) {
+    inp.setAttribute('list', 'feed-suggestions');
+    inp.setAttribute('autocomplete', 'off');
+    inp.addEventListener('input', onInput);
+  });
+})();
+</script>

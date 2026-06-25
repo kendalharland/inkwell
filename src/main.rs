@@ -21,6 +21,7 @@ mod admin;
 mod bookmarks;
 mod config;
 mod extract;
+mod feed_search;
 mod feeds;
 mod gemini;
 mod jobs;
@@ -115,6 +116,7 @@ async fn main() -> Result<()> {
         article_ttl_secs,
         compact_default: config.view.compact_default,
         dark_default: config.view.dark_default,
+        feed_search: config.feed_search.clone(),
     });
 
     // ---------- scheduler / workers ----------------------------------------

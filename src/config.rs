@@ -22,6 +22,49 @@ pub struct ConfigFile {
     /// Optional. When absent, no Gemini server is started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gemini: Option<GeminiConfig>,
+    /// Feed-discovery providers used by the admin UI's autocomplete.
+    /// Defaults to feedsearch.dev (no API key) so the feature works out
+    /// of the box; extra providers (Feedly, Inoreader, FeedBagel) slot
+    /// in here when their keys are available.
+    #[serde(default)]
+    pub feed_search: FeedSearchConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct FeedSearchConfig {
+    #[serde(default = "default_feed_search_providers")]
+    pub providers: Vec<FeedSearchProvider>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FeedSearchProvider {
+    /// Built-in: GET the user's URL, parse `<link rel="alternate">`
+    /// tags that point to RSS/Atom/JSON-feed payloads, return them.
+    /// Works for any site that advertises its feeds in markup —
+    /// which is most of them, and notably doesn't depend on a third
+    /// party staying up.
+    LinkAutoDiscovery,
+    /// https://feedsearch.dev — open, no API key. Currently behind a
+    /// Cloudflare challenge that blocks server-side requests, so this
+    /// provider often returns nothing; left available for environments
+    /// that can reach it (Cloudflare allow-lists, etc.).
+    Feedsearch,
+    // Slots for future providers; left intentionally absent until we
+    // wire keyed flows. Adding a new variant + matching arm in
+    // `feed_search::search_all` is the only code needed to enable one.
+}
+
+fn default_feed_search_providers() -> Vec<FeedSearchProvider> {
+    vec![FeedSearchProvider::LinkAutoDiscovery]
+}
+
+impl Default for FeedSearchConfig {
+    fn default() -> Self {
+        Self {
+            providers: default_feed_search_providers(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

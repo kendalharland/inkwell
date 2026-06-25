@@ -8,7 +8,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect},
     routing::{get, post},
-    Router,
+    Json, Router,
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use html_escape::encode_text;
@@ -18,6 +18,7 @@ use url::Url;
 use crate::{
     admin, bookmarks,
     extract::{extract_url, sanitize_images, BLOCKED_MARKER},
+    feed_search,
     feeds::{collect_entries, ensure_feeds, entry_full_html, item_id},
     state::AppState,
     view::{now_secs, page, render_entries, url_encode},
@@ -84,6 +85,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/admin", get(admin_index))
         .route("/admin/feed/add", post(admin_add_feed))
         .route("/admin/feed/remove", post(admin_remove_feed))
+        .route("/admin/feed-search", get(admin_feed_search))
         .route("/admin/group/add", post(admin_add_group))
         .route("/admin/group/remove", post(admin_remove_group))
         .with_state(state)
@@ -698,6 +700,23 @@ async fn admin_remove_group(
         Ok(()) => redirect_with_flash(Some(&format!("Removed group {}.", name)), None),
         Err(e) => redirect_with_flash(None, Some(&format!("Could not remove group: {}", e))),
     }
+}
+
+#[derive(Deserialize)]
+struct FeedSearchQ {
+    #[serde(default)]
+    q: String,
+}
+
+/// Proxy the admin autocomplete query to every configured discovery
+/// provider, then return a flat JSON array. Errors are deliberately
+/// swallowed in [`feed_search::search_all`] so a flaky provider can't
+/// take the autocomplete down.
+async fn admin_feed_search(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<FeedSearchQ>,
+) -> Json<Vec<feed_search::SearchResult>> {
+    Json(feed_search::search_all(&state.http, &state.feed_search, &q.q).await)
 }
 
 #[cfg(test)]

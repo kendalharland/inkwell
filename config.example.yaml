@@ -28,6 +28,19 @@ scheduler:
 view:
   compact_default: false
 
+# Optional. Discovery providers used by the admin UI's autocomplete
+# when adding a new feed. The default — link_auto_discovery —
+# fetches the user's URL and scrapes <link rel="alternate"> tags out
+# of the markup; works for any site that advertises its feeds that
+# way (most do). Extra providers can be listed alongside it.
+#
+# `feedsearch` (feedsearch.dev) is shipped but currently fronted by a
+# Cloudflare challenge that blocks server-side calls; leave it out
+# unless you have a route around it.
+feed_search:
+  providers:
+    - kind: link_auto_discovery
+
 # Optional. Serve the same content over the Gemini protocol on TLS.
 # Cert + key are generated on first launch if the files don't exist;
 # Gemini clients use TOFU so keep them stable across restarts.

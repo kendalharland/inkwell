@@ -281,6 +281,7 @@ mod tests {
             article_ttl_secs: 86400,
             compact_default: false,
             dark_default: false,
+            feed_search: crate::config::FeedSearchConfig::default(),
         }
     }
 
