@@ -10,6 +10,7 @@
 //! cannot trigger nested expansion.
 
 use std::{
+    collections::HashSet,
     fmt::Write as _,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -26,6 +27,34 @@ const LISTING_TEMPLATE: &str = include_str!("templates/listing.html");
 
 pub fn url_encode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
+}
+
+/// Small bookmark form rendered alongside each listing entry. Two
+/// hidden inputs carry the url and title so the bookmark row can stand
+/// on its own after the feed has rolled the entry off. `from` rides
+/// back into the redirect so the user lands on the same page+pagination
+/// they were viewing.
+pub fn render_bookmark_button(e: &EntryView, from_path: &str, bookmarked: bool) -> String {
+    let (action, glyph, label) = if bookmarked {
+        ("/unbookmark", "★", "Remove bookmark")
+    } else {
+        ("/bookmark", "☆", "Save for later")
+    };
+    format!(
+        "<form method='post' action='{action}/{iid}' class='bookmark-form'>\
+         <input type='hidden' name='url' value='{url}'>\
+         <input type='hidden' name='title' value='{title}'>\
+         <input type='hidden' name='from' value='{from}'>\
+         <button type='submit' class='bookmark-btn' aria-label='{label}'>{glyph}</button>\
+         </form>",
+        action = action,
+        iid = e.iid,
+        url = encode_text(&e.url),
+        title = encode_text(&e.title),
+        from = encode_text(from_path),
+        label = label,
+        glyph = glyph,
+    )
 }
 
 pub fn now_secs() -> i64 {
@@ -60,6 +89,7 @@ pub fn page(title: &str, body: &str, body_class: &str) -> String {
 pub fn render_entries(
     title: &str,
     entries: &[EntryView],
+    bookmarks: &HashSet<String>,
     page_num: usize,
     base_path: &str,
     show_source: bool,
@@ -91,10 +121,16 @@ pub fn render_entries(
         } else {
             String::new()
         };
+        let bookmarked = bookmarks.contains(&e.iid);
+        let bm = render_bookmark_button(e, &from, bookmarked);
         write!(
             items,
-            "<li><a href='/item/{iid}?from={from}'>{title}</a>\
-             <div class='meta'>{host}{source}</div></li>",
+            "<li class='entry'>{bm}\
+             <div class='entry-body'>\
+             <a href='/item/{iid}?from={from}'>{title}</a>\
+             <div class='meta'>{host}{source}</div>\
+             </div></li>",
+            bm = bm,
             iid = e.iid,
             from = from_enc,
             title = encode_text(&e.title),
@@ -139,6 +175,7 @@ mod tests {
             iid: iid.into(),
             title: title.into(),
             host: "example.com".into(),
+            url: "https://example.com/x".into(),
             published_ts: ts,
             feed_title: "Test Feed".into(),
         }
@@ -172,9 +209,13 @@ mod tests {
         assert!(p.contains(r#"<body class="compact""#));
     }
 
+    fn no_bookmarks() -> HashSet<String> {
+        HashSet::new()
+    }
+
     #[test]
     fn render_entries_shows_empty_state() {
-        let out = render_entries("None", &[], 1, "/feed/0", false);
+        let out = render_entries("None", &[], &no_bookmarks(), 1, "/feed/0", false);
         assert!(out.contains("No items."));
         assert!(!out.contains("class='pager'"));
     }
@@ -184,7 +225,7 @@ mod tests {
         let entries: Vec<_> = (0..PAGE_SIZE)
             .map(|i| ev(&format!("{:016x}", i), &format!("t{}", i), i as i64))
             .collect();
-        let out = render_entries("All", &entries, 1, "/", true);
+        let out = render_entries("All", &entries, &no_bookmarks(), 1, "/", true);
         assert!(!out.contains("class='pager'"));
         assert!(out.contains("t0"));
         assert!(out.contains(&format!("t{}", PAGE_SIZE - 1)));
@@ -195,9 +236,9 @@ mod tests {
         let entries: Vec<_> = (0..PAGE_SIZE * 2 + 5)
             .map(|i| ev(&format!("{:016x}", i), &format!("t{}", i), i as i64))
             .collect();
-        let p1 = render_entries("All", &entries, 1, "/", true);
-        let p2 = render_entries("All", &entries, 2, "/", true);
-        let p3 = render_entries("All", &entries, 3, "/", true);
+        let p1 = render_entries("All", &entries, &no_bookmarks(), 1, "/", true);
+        let p2 = render_entries("All", &entries, &no_bookmarks(), 2, "/", true);
+        let p3 = render_entries("All", &entries, &no_bookmarks(), 3, "/", true);
 
         assert!(p1.contains("Page 1 of 3"));
         assert!(p1.contains(">Next<"));
@@ -217,7 +258,7 @@ mod tests {
         let entries: Vec<_> = (0..3)
             .map(|i| ev(&format!("{:016x}", i), &format!("t{}", i), i as i64))
             .collect();
-        let out = render_entries("All", &entries, 99, "/", false);
+        let out = render_entries("All", &entries, &no_bookmarks(), 99, "/", false);
         assert!(out.contains("t0"));
         assert!(out.contains("t2"));
     }
@@ -225,9 +266,29 @@ mod tests {
     #[test]
     fn show_source_toggle_emits_feed_title() {
         let entries = vec![ev("aaaa", "hello", 1)];
-        let with = render_entries("X", &entries, 1, "/", true);
-        let without = render_entries("X", &entries, 1, "/", false);
+        let with = render_entries("X", &entries, &no_bookmarks(), 1, "/", true);
+        let without = render_entries("X", &entries, &no_bookmarks(), 1, "/", false);
         assert!(with.contains("Test Feed"));
         assert!(!without.contains("Test Feed"));
+    }
+
+    #[test]
+    fn render_entries_marks_bookmarked_with_filled_star() {
+        let entries = vec![ev("aaaa", "hello", 1)];
+        let mut bm = HashSet::new();
+        bm.insert("aaaa".to_string());
+        let out = render_entries("X", &entries, &bm, 1, "/", false);
+        assert!(out.contains("★"), "expected filled star, got: {}", out);
+        assert!(out.contains("action='/unbookmark/aaaa'"));
+        assert!(!out.contains("action='/bookmark/aaaa'"));
+    }
+
+    #[test]
+    fn render_entries_marks_unbookmarked_with_outline_star() {
+        let entries = vec![ev("aaaa", "hello", 1)];
+        let out = render_entries("X", &entries, &no_bookmarks(), 1, "/", false);
+        assert!(out.contains("☆"), "expected outline star, got: {}", out);
+        assert!(out.contains("action='/bookmark/aaaa'"));
+        assert!(!out.contains("action='/unbookmark/aaaa'"));
     }
 }

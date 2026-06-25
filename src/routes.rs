@@ -16,7 +16,7 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::{
-    admin,
+    admin, bookmarks,
     extract::{extract_url, sanitize_images, BLOCKED_MARKER},
     feeds::{collect_entries, ensure_feeds, entry_full_html, item_id},
     state::AppState,
@@ -76,6 +76,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/groups", get(groups_list))
         .route("/group/{idx}", get(one_group))
         .route("/item/{iid}", get(one_item))
+        .route("/read-later", get(read_later))
+        .route("/bookmark/{iid}", post(add_bookmark))
+        .route("/unbookmark/{iid}", post(remove_bookmark))
         .route("/settings/compact", get(set_compact))
         .route("/settings/theme", get(set_theme))
         .route("/admin", get(admin_index))
@@ -201,7 +204,11 @@ async fn all_stories(
     ensure_feeds(state.clone(), &all_idxs, false).await;
     let cache = state.feed_cache.read().await;
     let entries = collect_entries(&feeds, &cache, &all_idxs);
-    let body = render_entries("All stories", &entries, q.page, "/", true);
+    let bms = {
+        let conn = state.db.lock().await;
+        bookmarks::load_ids(&conn)
+    };
+    let body = render_entries("All stories", &entries, &bms, q.page, "/", true);
     Html(page("All stories", &body, &bc))
 }
 
@@ -249,7 +256,11 @@ async fn one_feed(
         .and_then(|c| c.parsed.title.as_ref().map(|t| t.content.clone()))
         .unwrap_or_else(|| feeds[idx].clone());
     let entries = collect_entries(&feeds, &cache, &[idx]);
-    let body = render_entries(&title, &entries, q.page, &format!("/feed/{}", idx), false);
+    let bms = {
+        let conn = state.db.lock().await;
+        bookmarks::load_ids(&conn)
+    };
+    let body = render_entries(&title, &entries, &bms, q.page, &format!("/feed/{}", idx), false);
     Ok(Html(page(&title, &body, &bc)))
 }
 
@@ -295,7 +306,11 @@ async fn one_group(
     ensure_feeds(state.clone(), &indices, false).await;
     let cache = state.feed_cache.read().await;
     let entries = collect_entries(&feeds, &cache, &indices);
-    let body = render_entries(&name, &entries, q.page, &format!("/group/{}", idx), true);
+    let bms = {
+        let conn = state.db.lock().await;
+        bookmarks::load_ids(&conn)
+    };
+    let body = render_entries(&name, &entries, &bms, q.page, &format!("/group/{}", idx), true);
     Ok(Html(page(&name, &body, &bc)))
 }
 
@@ -394,6 +409,11 @@ async fn one_item(
         .ok()
         .and_then(|u| u.host_str().map(|s| s.to_string()))
         .unwrap_or_default();
+    let bookmarked = {
+        let conn = state.db.lock().await;
+        bookmarks::is_bookmarked(&conn, &iid)
+    };
+    let bookmark_btn = render_item_bookmark_button(&iid, &link, &title, &back, bookmarked);
     let body = crate::template::render(
         include_str!("templates/item.html"),
         &[
@@ -402,9 +422,126 @@ async fn one_item(
             ("host", &encode_text(&host)),
             ("body", &body_html),
             ("back", &encode_text(&back)),
+            ("bookmark", &bookmark_btn),
         ],
     );
     Ok(Html(page(&title, &body, &bc)))
+}
+
+fn render_item_bookmark_button(
+    iid: &str,
+    url: &str,
+    title: &str,
+    from: &str,
+    bookmarked: bool,
+) -> String {
+    let (action, glyph, label) = if bookmarked {
+        ("/unbookmark", "★", "Remove bookmark")
+    } else {
+        ("/bookmark", "☆", "Save for later")
+    };
+    format!(
+        "<form method='post' action='{action}/{iid}' class='bookmark-form bookmark-form-lg'>\
+         <input type='hidden' name='url' value='{url}'>\
+         <input type='hidden' name='title' value='{title}'>\
+         <input type='hidden' name='from' value='{from}'>\
+         <button type='submit' class='bookmark-btn bookmark-btn-lg' aria-label='{label}'>{glyph}</button>\
+         </form>",
+        action = action,
+        iid = iid,
+        url = encode_text(url),
+        title = encode_text(title),
+        from = encode_text(from),
+        label = label,
+        glyph = glyph,
+    )
+}
+
+#[derive(Deserialize)]
+struct BookmarkForm {
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    from: Option<String>,
+}
+
+async fn add_bookmark(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    AxumPath(iid): AxumPath<String>,
+    Form(f): Form<BookmarkForm>,
+) -> Redirect {
+    let url = f.url.trim();
+    let title = f.title.trim();
+    if !url.is_empty() && !title.is_empty() {
+        let conn = state.db.lock().await;
+        if let Err(e) = bookmarks::add(&conn, &iid, url, title, now_secs()) {
+            tracing::error!("bookmark add failed for {}: {e:#}", iid);
+        }
+    }
+    Redirect::to(&back_url(&headers, f.from.as_deref()))
+}
+
+async fn remove_bookmark(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    AxumPath(iid): AxumPath<String>,
+    Form(f): Form<BookmarkForm>,
+) -> Redirect {
+    {
+        let conn = state.db.lock().await;
+        if let Err(e) = bookmarks::remove(&conn, &iid) {
+            tracing::error!("bookmark remove failed for {}: {e:#}", iid);
+        }
+    }
+    Redirect::to(&back_url(&headers, f.from.as_deref()))
+}
+
+async fn read_later(
+    State(state): State<Arc<AppState>>,
+    jar: CookieJar,
+    Query(q): Query<PageQ>,
+) -> Html<String> {
+    let bc = body_classes(&jar, q.compact, q.theme.as_deref(), &state);
+    let items_data = {
+        let conn = state.db.lock().await;
+        bookmarks::list(&conn).unwrap_or_default()
+    };
+    if items_data.is_empty() {
+        let body = "<h1>Read later</h1><div class='empty'>No bookmarks yet. \
+                    Tap the ☆ next to a story to save it for later.</div>";
+        return Html(page("Read later", body, &bc));
+    }
+    let mut items = String::from("<h1>Read later</h1><ul class='list'>");
+    let from_enc = url_encode("/read-later");
+    for b in &items_data {
+        let host = Url::parse(&b.url)
+            .ok()
+            .and_then(|u| u.host_str().map(|s| s.to_string()))
+            .unwrap_or_default();
+        write!(
+            items,
+            "<li class='entry'>\
+             <form method='post' action='/unbookmark/{iid}' class='bookmark-form'>\
+             <input type='hidden' name='from' value='{from_path}'>\
+             <button type='submit' class='bookmark-btn' aria-label='Remove bookmark'>★</button>\
+             </form>\
+             <div class='entry-body'>\
+             <a href='/item/{iid}?from={from}'>{title}</a>\
+             <div class='meta'>{host}</div>\
+             </div></li>",
+            iid = b.article_id,
+            from = from_enc,
+            from_path = encode_text("/read-later"),
+            title = encode_text(&b.title),
+            host = encode_text(&host),
+        )
+        .unwrap();
+    }
+    items.push_str("</ul>");
+    Html(page("Read later", &items, &bc))
 }
 
 // ---------------------------------------------------------------------------

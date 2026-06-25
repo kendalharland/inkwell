@@ -117,6 +117,10 @@ pub struct EntryView {
     pub iid: String,
     pub title: String,
     pub host: String,
+    /// Original article URL. Carried alongside the iid so the bookmark
+    /// form can persist it directly — the read-later table needs the
+    /// real URL, not just the hashed id.
+    pub url: String,
     /// Unix seconds. `0` means "no date in the feed" — these items fall to
     /// the bottom of the sort.
     pub published_ts: i64,
@@ -165,6 +169,7 @@ pub fn collect_entries(
                 iid: item_id(&link),
                 title,
                 host,
+                url: link,
                 published_ts,
                 feed_title: feed_title.clone(),
             });

@@ -150,6 +150,34 @@ blockquote {
 .flash-ok { background: var(--ok-bg); border-color: var(--ok-border); }
 .flash-err { background: var(--err-bg); border-color: var(--err-border); }
 
+/* Bookmark icon. The listing star is sized for Kindle taps (~32px) and
+   sits to the left of each entry; the article-page star is bigger and
+   floats up next to the h1. Color stays subtle (muted) so the row's
+   title is still the visual focus. */
+ul.list li.entry { display: flex; align-items: flex-start; gap: .6em; }
+ul.list li.entry .entry-body { flex: 1; min-width: 0; }
+.bookmark-form { display: inline-block; margin: 0; padding: 0; }
+.bookmark-btn {
+  background: transparent;
+  border: none;
+  padding: .2em .35em;
+  margin: 0;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--muted);
+  min-width: 32px;
+  min-height: 32px;
+}
+.bookmark-btn:hover { color: var(--fg); }
+.bookmark-btn:focus { outline: 1px dotted var(--border); outline-offset: 2px; }
+
+.item-header { display: flex; align-items: flex-start; gap: .5em; }
+.item-header h1 { flex: 1; }
+.bookmark-btn-lg { font-size: 30px; padding: .1em .3em; }
+body.compact .bookmark-btn { font-size: 19px; min-width: 28px; min-height: 28px; }
+body.compact .bookmark-btn-lg { font-size: 26px; }
+
 /* Compact density — toggled by ?compact=1 or view.compact_default. */
 body.compact { font-size: 16px; line-height: 1.4; max-width: 36em; }
 body.compact h1 { font-size: 22px; }

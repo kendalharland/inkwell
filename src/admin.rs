@@ -52,6 +52,17 @@ CREATE TABLE IF NOT EXISTS feed_subscription (
     PRIMARY KEY (group_name, url),
     FOREIGN KEY (group_name) REFERENCES feed_group(name) ON DELETE CASCADE
 );
+
+-- Bookmarks (\"read later\") store title + url alongside the article id
+-- so an entry stays visible even after its feed rolls it off — the
+-- listing handler doesn't need to JOIN against `article` to render.
+CREATE TABLE IF NOT EXISTS bookmark (
+    article_id TEXT PRIMARY KEY,
+    url TEXT NOT NULL,
+    title TEXT NOT NULL,
+    bookmarked_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS bookmark_bookmarked_at_idx ON bookmark(bookmarked_at);
 ";
 
 /// First-run seed. No-op if the DB already has any groups; otherwise

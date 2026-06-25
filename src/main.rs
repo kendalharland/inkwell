@@ -18,6 +18,7 @@
 //! top of [`jobs`].
 
 mod admin;
+mod bookmarks;
 mod config;
 mod extract;
 mod feeds;

@@ -116,13 +116,20 @@ pub async fn run_refresh(state: Arc<AppState>) -> Result<(usize, usize)> {
     Ok((total, new_extractions))
 }
 
-/// Delete cached articles older than `article_ttl_secs`. Returns the
-/// number of rows removed.
+/// Delete cached articles older than `article_ttl_secs`, except for
+/// articles the user bookmarked into the "read later" pane — those are
+/// pinned past the TTL so a saved entry doesn't silently vanish.
+/// Returns the number of rows removed.
 pub async fn run_purge(state: Arc<AppState>) -> Result<usize> {
     let cutoff = now_secs() - state.article_ttl_secs;
     let n = {
         let conn = state.db.lock().await;
-        conn.execute("DELETE FROM article WHERE fetched_at < ?1", [cutoff])?
+        conn.execute(
+            "DELETE FROM article \
+             WHERE fetched_at < ?1 \
+               AND id NOT IN (SELECT article_id FROM bookmark)",
+            [cutoff],
+        )?
     };
     Ok(n)
 }

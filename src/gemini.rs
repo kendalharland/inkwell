@@ -791,6 +791,7 @@ mod tests {
                 iid: format!("{:016x}", i),
                 title: format!("Story {}", i),
                 host: "example.com".into(),
+                url: format!("https://example.com/{}", i),
                 published_ts: i as i64,
                 feed_title: "F".into(),
             })
