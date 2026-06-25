@@ -5,7 +5,6 @@
 
 use std::{
     collections::HashMap,
-    path::PathBuf,
     time::{Duration, SystemTime},
 };
 
@@ -58,10 +57,5 @@ pub struct AppState {
     /// Default for the dark-theme variant. Same precedence rules as
     /// `compact_default`.
     pub dark_default: bool,
-    /// Path of the YAML config file. The admin UI rewrites this file in
-    /// place when feeds or groups change, then hot-reloads the live
-    /// state. Comments in the original YAML are not preserved on
-    /// rewrite — surfaced in the admin UI as a warning.
-    pub config_path: PathBuf,
 }
 

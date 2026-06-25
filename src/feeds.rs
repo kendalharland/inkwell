@@ -276,7 +276,6 @@ mod tests {
             article_ttl_secs: 86400,
             compact_default: false,
             dark_default: false,
-            config_path: std::path::PathBuf::from("test.yaml"),
         }
     }
 

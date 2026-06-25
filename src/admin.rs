@@ -1,103 +1,149 @@
-//! Admin: mutation primitives for the YAML config plus a hot-reload helper.
+//! Admin: DB-backed persistence for feeds and groups.
 //!
-//! Persistence model — kept deliberately simple:
+//! Persistence model:
 //!
-//! 1. The admin UI reads the current YAML off disk and parses it into
-//!    [`ConfigFile`].
-//! 2. A mutation primitive (`add_feed`, `remove_group`, etc.) modifies
-//!    the parsed value in memory.
-//! 3. The result is serialized back to the same path.
-//! 4. [`apply_config`] rebuilds the live runtime state under the
-//!    `AppState` write-locks and clears the feed cache.
-//!
-//! Tradeoffs we accept:
-//!
-//! * Comments in the YAML are lost on rewrite (serde_yml strips them).
-//!   The admin UI warns about this; users who care can edit the file
-//!   directly and the server picks it up on next restart.
-//! * The feed-cache clear means the next request triggers a refetch.
-//!   That's the right behavior because feed indices may have shifted
-//!   (e.g. a feed was removed from group A but still exists via group B
-//!   — its index in the deduplicated `feeds` vec changes).
-//!
-//! Mutation primitives are pure (operate on `&mut ConfigFile`) and
-//! unit-tested in isolation. The thin IO wrapper `mutate_config` joins
-//! them with reading, writing, and reloading.
+//! 1. Feeds and groups live in `feed_group` + `feed_subscription` in the
+//!    same SQLite file used by the article cache. They survive container
+//!    recreations because the DB sits under `/data`, while the YAML
+//!    config is baked into the image.
+//! 2. On startup, if `feed_group` is empty, [`ensure_seeded`] populates
+//!    both tables from `config.rss`. After the first run the config's
+//!    `rss:` section is effectively read-only documentation / first-run
+//!    seed — admin mutations write to the DB.
+//! 3. After every mutation, [`apply_from_db`] rebuilds the index-keyed
+//!    runtime state and clears the feed cache so a feed that just
+//!    shifted index isn't read against a stale cache entry.
 
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
+use rusqlite::{params, Connection};
 
 use crate::{
-    config::{ConfigFile, GroupConfig},
+    config::ConfigFile,
     state::{AppState, GroupInfo},
 };
 
-/// Project a parsed config into the index-keyed runtime layout that
-/// handlers and jobs read from. Used both at startup and after every
-/// admin write.
-pub fn build_runtime_state(cfg: &ConfigFile) -> (Vec<String>, Vec<Option<String>>, Vec<GroupInfo>) {
+/// Schema for tables this module owns plus the global PRAGMAs the rest
+/// of the process relies on. Run once at startup against the connection
+/// that will end up in [`AppState::db`].
+pub const SCHEMA: &str = "
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+PRAGMA foreign_keys=ON;
+
+CREATE TABLE IF NOT EXISTS article (
+    id TEXT PRIMARY KEY,
+    url TEXT,
+    title TEXT,
+    html TEXT,
+    fetched_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS article_fetched_at_idx ON article(fetched_at);
+
+CREATE TABLE IF NOT EXISTS feed_group (
+    name TEXT PRIMARY KEY,
+    position INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS feed_subscription (
+    group_name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (group_name, url),
+    FOREIGN KEY (group_name) REFERENCES feed_group(name) ON DELETE CASCADE
+);
+";
+
+/// First-run seed. No-op if the DB already has any groups; otherwise
+/// copies `config.rss` into the tables, preserving the configured
+/// ordering of both groups and the feeds within each group.
+pub fn ensure_seeded(conn: &Connection, cfg: &ConfigFile) -> Result<()> {
+    let n: i64 = conn
+        .query_row("SELECT COUNT(*) FROM feed_group", [], |r| r.get(0))
+        .context("counting feed_group")?;
+    if n > 0 {
+        return Ok(());
+    }
+    let tx = conn.unchecked_transaction()?;
+    for (gpos, g) in cfg.rss.groups.iter().enumerate() {
+        tx.execute(
+            "INSERT OR IGNORE INTO feed_group (name, position) VALUES (?1, ?2)",
+            params![&g.name, gpos as i64],
+        )?;
+        for (fpos, url) in g.feeds.iter().enumerate() {
+            tx.execute(
+                "INSERT OR IGNORE INTO feed_subscription (group_name, url, position) \
+                 VALUES (?1, ?2, ?3)",
+                params![&g.name, url, fpos as i64],
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Project the DB into the index-keyed runtime layout that handlers and
+/// jobs read from. Used both at startup and after every admin write.
+///
+/// Feeds are deduplicated across groups — a URL listed in groups A and B
+/// resolves to one entry in the returned `feeds` vec and the same index
+/// in both groups' `feed_indices`.
+pub fn build_runtime_state(
+    conn: &Connection,
+) -> Result<(Vec<String>, Vec<Option<String>>, Vec<GroupInfo>)> {
     let mut feeds: Vec<String> = Vec::new();
     let mut url_to_idx: HashMap<String, usize> = HashMap::new();
     let mut groups: Vec<GroupInfo> = Vec::new();
-    for g in &cfg.rss.groups {
-        let mut idxs = Vec::new();
-        for url in &g.feeds {
-            let idx = *url_to_idx.entry(url.clone()).or_insert_with(|| {
+
+    let group_names: Vec<String> = conn
+        .prepare("SELECT name FROM feed_group ORDER BY position, name")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<_, _>>()?;
+
+    let mut feed_stmt = conn.prepare(
+        "SELECT url FROM feed_subscription WHERE group_name = ?1 ORDER BY position, rowid",
+    )?;
+    for name in group_names {
+        let urls: Vec<String> = feed_stmt
+            .query_map(params![&name], |r| r.get::<_, String>(0))?
+            .collect::<Result<_, _>>()?;
+        let mut idxs = Vec::with_capacity(urls.len());
+        for url in urls {
+            let i = *url_to_idx.entry(url.clone()).or_insert_with(|| {
                 let i = feeds.len();
-                feeds.push(url.clone());
+                feeds.push(url);
                 i
             });
-            idxs.push(idx);
+            idxs.push(i);
         }
         groups.push(GroupInfo {
-            name: g.name.clone(),
+            name,
             feed_indices: idxs,
         });
     }
     let titles = vec![None; feeds.len()];
-    (feeds, titles, groups)
+    Ok((feeds, titles, groups))
 }
 
-/// Atomically swap the live runtime state to match `cfg`. The feed cache
-/// is cleared because feed indices may have shifted and stale entries
-/// would be served against the wrong feed.
-pub async fn apply_config(state: &AppState, cfg: &ConfigFile) {
-    let (feeds, titles, groups) = build_runtime_state(cfg);
+/// Re-read DB → swap runtime state under write-locks → clear feed cache.
+/// Called after every successful mutation so the change is visible
+/// without a server restart. The feed cache is cleared because indices
+/// may have shifted and stale entries would point at the wrong feed.
+pub async fn apply_from_db(state: &AppState) -> Result<()> {
+    let (feeds, titles, groups) = {
+        let conn = state.db.lock().await;
+        build_runtime_state(&conn)?
+    };
     *state.feeds.write().await = feeds;
     *state.feed_titles.write().await = titles;
     *state.groups.write().await = groups;
     state.feed_cache.write().await.clear();
-}
-
-pub fn read_config(state: &AppState) -> Result<ConfigFile> {
-    let yaml = std::fs::read_to_string(&state.config_path)
-        .with_context(|| format!("reading {}", state.config_path.display()))?;
-    serde_yml::from_str(&yaml).context("parsing yaml")
-}
-
-pub fn write_config(state: &AppState, cfg: &ConfigFile) -> Result<()> {
-    let yaml = serde_yml::to_string(cfg).context("serializing yaml")?;
-    std::fs::write(&state.config_path, yaml)
-        .with_context(|| format!("writing {}", state.config_path.display()))
-}
-
-/// Read → mutate → write → hot-reload, in that order. The closure is
-/// the only piece a route handler has to supply.
-pub async fn mutate_config<F>(state: &AppState, f: F) -> Result<()>
-where
-    F: FnOnce(&mut ConfigFile) -> Result<()>,
-{
-    let mut cfg = read_config(state)?;
-    f(&mut cfg)?;
-    write_config(state, &cfg)?;
-    apply_config(state, &cfg).await;
     Ok(())
 }
 
-// ----- Mutation primitives ----------------------------------------------
+// ----- Validation (pure) -------------------------------------------------
 
-pub fn add_feed_to_group(cfg: &mut ConfigFile, group: &str, url: &str) -> Result<()> {
+pub fn validate_feed_url(url: &str) -> Result<&str> {
     let url = url.trim();
     if url.is_empty() {
         anyhow::bail!("url is empty");
@@ -105,51 +151,131 @@ pub fn add_feed_to_group(cfg: &mut ConfigFile, group: &str, url: &str) -> Result
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         anyhow::bail!("url must start with http:// or https://");
     }
-    let Some(g) = cfg.rss.groups.iter_mut().find(|g| g.name == group) else {
-        anyhow::bail!("group {:?} does not exist", group);
-    };
-    if !g.feeds.iter().any(|u| u == url) {
-        g.feeds.push(url.to_string());
-    }
-    Ok(())
+    Ok(url)
 }
 
-pub fn remove_feed_from_group(cfg: &mut ConfigFile, group: &str, url: &str) -> Result<()> {
-    let Some(g) = cfg.rss.groups.iter_mut().find(|g| g.name == group) else {
-        anyhow::bail!("group {:?} does not exist", group);
-    };
-    g.feeds.retain(|u| u != url);
-    Ok(())
-}
-
-pub fn add_group(cfg: &mut ConfigFile, name: &str) -> Result<()> {
+pub fn validate_group_name(name: &str) -> Result<&str> {
     let name = name.trim();
     if name.is_empty() {
         anyhow::bail!("group name is empty");
     }
-    if cfg.rss.groups.iter().any(|g| g.name == name) {
-        anyhow::bail!("group {:?} already exists", name);
-    }
-    cfg.rss.groups.push(GroupConfig {
-        name: name.to_string(),
-        feeds: Vec::new(),
-    });
-    Ok(())
+    Ok(name)
 }
 
-pub fn remove_group(cfg: &mut ConfigFile, name: &str) -> Result<()> {
-    let before = cfg.rss.groups.len();
-    cfg.rss.groups.retain(|g| g.name != name);
-    if cfg.rss.groups.len() == before {
-        anyhow::bail!("group {:?} does not exist", name);
+// ----- DB-backed mutations ----------------------------------------------
+
+pub async fn add_feed_to_group(state: &AppState, group: &str, url: &str) -> Result<()> {
+    let url = validate_feed_url(url)?.to_string();
+    {
+        let conn = state.db.lock().await;
+        let exists: bool = conn
+            .query_row("SELECT 1 FROM feed_group WHERE name = ?1", [group], |_| {
+                Ok(true)
+            })
+            .unwrap_or(false);
+        if !exists {
+            anyhow::bail!("group {:?} does not exist", group);
+        }
+        let pos: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(position)+1, 0) FROM feed_subscription WHERE group_name = ?1",
+            [group],
+            |r| r.get(0),
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO feed_subscription (group_name, url, position) \
+             VALUES (?1, ?2, ?3)",
+            params![group, &url, pos],
+        )?;
     }
-    Ok(())
+    apply_from_db(state).await
+}
+
+pub async fn remove_feed_from_group(state: &AppState, group: &str, url: &str) -> Result<()> {
+    {
+        let conn = state.db.lock().await;
+        conn.execute(
+            "DELETE FROM feed_subscription WHERE group_name = ?1 AND url = ?2",
+            params![group, url],
+        )?;
+    }
+    apply_from_db(state).await
+}
+
+pub async fn add_group(state: &AppState, name: &str) -> Result<()> {
+    let name = validate_group_name(name)?.to_string();
+    {
+        let conn = state.db.lock().await;
+        let exists: bool = conn
+            .query_row("SELECT 1 FROM feed_group WHERE name = ?1", [&name], |_| {
+                Ok(true)
+            })
+            .unwrap_or(false);
+        if exists {
+            anyhow::bail!("group {:?} already exists", name);
+        }
+        let pos: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(position)+1, 0) FROM feed_group",
+            [],
+            |r| r.get(0),
+        )?;
+        conn.execute(
+            "INSERT INTO feed_group (name, position) VALUES (?1, ?2)",
+            params![&name, pos],
+        )?;
+    }
+    apply_from_db(state).await
+}
+
+pub async fn remove_group(state: &AppState, name: &str) -> Result<()> {
+    {
+        let conn = state.db.lock().await;
+        let n = conn.execute("DELETE FROM feed_group WHERE name = ?1", [name])?;
+        if n == 0 {
+            anyhow::bail!("group {:?} does not exist", name);
+        }
+        // feed_subscription rows for this group are cascaded by the FK.
+    }
+    apply_from_db(state).await
+}
+
+/// Read the full current config back out of the DB. Used by the admin
+/// UI to render the list of groups and their feeds; doesn't touch the
+/// in-memory `AppState` because the admin renderer can serve straight
+/// from the DB without going through the dedup layer.
+pub struct GroupView {
+    pub name: String,
+    pub feeds: Vec<String>,
+}
+
+pub async fn list_groups(state: &AppState) -> Result<Vec<GroupView>> {
+    let conn = state.db.lock().await;
+    let names: Vec<String> = conn
+        .prepare("SELECT name FROM feed_group ORDER BY position, name")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<_, _>>()?;
+    let mut feed_stmt = conn.prepare(
+        "SELECT url FROM feed_subscription WHERE group_name = ?1 ORDER BY position, rowid",
+    )?;
+    let mut out = Vec::with_capacity(names.len());
+    for name in names {
+        let feeds: Vec<String> = feed_stmt
+            .query_map(params![&name], |r| r.get::<_, String>(0))?
+            .collect::<Result<_, _>>()?;
+        out.push(GroupView { name, feeds });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{RssConfig, ViewConfig};
+    use crate::config::{GroupConfig, RssConfig, ViewConfig};
+
+    fn fresh_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn
+    }
 
     fn empty_config() -> ConfigFile {
         ConfigFile {
@@ -171,103 +297,111 @@ mod tests {
         c
     }
 
-    #[test]
-    fn add_group_creates_empty_group() {
-        let mut c = empty_config();
-        add_group(&mut c, "tech").unwrap();
-        assert_eq!(c.rss.groups.len(), 1);
-        assert_eq!(c.rss.groups[0].name, "tech");
-        assert!(c.rss.groups[0].feeds.is_empty());
+    fn group_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM feed_group", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn feed_count(conn: &Connection, group: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM feed_subscription WHERE group_name = ?1",
+            [group],
+            |r| r.get(0),
+        )
+        .unwrap()
     }
 
     #[test]
-    fn add_group_rejects_duplicate() {
-        let mut c = config_with(&[("tech", &[])]);
-        let err = add_group(&mut c, "tech").unwrap_err().to_string();
-        assert!(err.contains("already exists"));
+    fn validate_feed_url_rejects_non_http() {
+        assert!(validate_feed_url("ftp://x").is_err());
+        assert!(validate_feed_url("javascript:alert(1)").is_err());
+        assert!(validate_feed_url("").is_err());
+        assert!(validate_feed_url("   ").is_err());
+        assert_eq!(
+            validate_feed_url("  https://x.com/rss  ").unwrap(),
+            "https://x.com/rss"
+        );
     }
 
     #[test]
-    fn add_group_rejects_empty_name() {
-        let mut c = empty_config();
-        assert!(add_group(&mut c, "   ").is_err());
+    fn validate_group_name_rejects_empty() {
+        assert!(validate_group_name("   ").is_err());
+        assert_eq!(validate_group_name("  tech  ").unwrap(), "tech");
     }
 
     #[test]
-    fn remove_group_deletes() {
-        let mut c = config_with(&[("a", &["https://a"]), ("b", &[])]);
-        remove_group(&mut c, "a").unwrap();
-        assert_eq!(c.rss.groups.len(), 1);
-        assert_eq!(c.rss.groups[0].name, "b");
+    fn ensure_seeded_populates_empty_db() {
+        let conn = fresh_conn();
+        let cfg = config_with(&[("a", &["https://a"]), ("b", &["https://b", "https://c"])]);
+        ensure_seeded(&conn, &cfg).unwrap();
+        assert_eq!(group_count(&conn), 2);
+        assert_eq!(feed_count(&conn, "a"), 1);
+        assert_eq!(feed_count(&conn, "b"), 2);
     }
 
     #[test]
-    fn remove_group_errors_when_missing() {
-        let mut c = config_with(&[("a", &[])]);
-        assert!(remove_group(&mut c, "missing").is_err());
-    }
-
-    #[test]
-    fn add_feed_appends_to_group() {
-        let mut c = config_with(&[("tech", &[])]);
-        add_feed_to_group(&mut c, "tech", "https://hn.org/rss").unwrap();
-        assert_eq!(c.rss.groups[0].feeds, vec!["https://hn.org/rss"]);
-    }
-
-    #[test]
-    fn add_feed_is_idempotent() {
-        let mut c = config_with(&[("tech", &["https://hn.org/rss"])]);
-        add_feed_to_group(&mut c, "tech", "https://hn.org/rss").unwrap();
-        assert_eq!(c.rss.groups[0].feeds.len(), 1);
-    }
-
-    #[test]
-    fn add_feed_rejects_missing_group() {
-        let mut c = empty_config();
-        assert!(add_feed_to_group(&mut c, "x", "https://a").is_err());
-    }
-
-    #[test]
-    fn add_feed_rejects_non_http_url() {
-        let mut c = config_with(&[("tech", &[])]);
-        assert!(add_feed_to_group(&mut c, "tech", "ftp://x").is_err());
-        assert!(add_feed_to_group(&mut c, "tech", "javascript:alert(1)").is_err());
-        assert!(add_feed_to_group(&mut c, "tech", "").is_err());
-    }
-
-    #[test]
-    fn add_feed_trims_whitespace() {
-        let mut c = config_with(&[("tech", &[])]);
-        add_feed_to_group(&mut c, "tech", "  https://x.com/rss  ").unwrap();
-        assert_eq!(c.rss.groups[0].feeds, vec!["https://x.com/rss"]);
-    }
-
-    #[test]
-    fn remove_feed_drops_url() {
-        let mut c = config_with(&[("tech", &["https://a", "https://b"])]);
-        remove_feed_from_group(&mut c, "tech", "https://a").unwrap();
-        assert_eq!(c.rss.groups[0].feeds, vec!["https://b"]);
-    }
-
-    #[test]
-    fn remove_feed_is_silent_when_missing() {
-        let mut c = config_with(&[("tech", &["https://a"])]);
-        remove_feed_from_group(&mut c, "tech", "https://missing").unwrap();
-        assert_eq!(c.rss.groups[0].feeds, vec!["https://a"]);
+    fn ensure_seeded_is_idempotent_and_does_not_overwrite_db_changes() {
+        let conn = fresh_conn();
+        // First-run seed.
+        ensure_seeded(&conn, &config_with(&[("a", &["https://a"])])).unwrap();
+        // Simulate an admin add via the DB.
+        conn.execute(
+            "INSERT INTO feed_subscription (group_name, url, position) VALUES (?1, ?2, ?3)",
+            params!["a", "https://added-by-admin", 1_i64],
+        )
+        .unwrap();
+        // Re-seed with a different config: must be a no-op because the
+        // DB is non-empty. Admin's added feed survives; the new config's
+        // feed is ignored.
+        ensure_seeded(&conn, &config_with(&[("a", &["https://stale-config"])])).unwrap();
+        let urls: Vec<String> = conn
+            .prepare("SELECT url FROM feed_subscription WHERE group_name = 'a' ORDER BY position")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(urls, vec!["https://a", "https://added-by-admin"]);
     }
 
     #[test]
     fn build_runtime_state_dedupes_feeds_across_groups() {
-        let c = config_with(&[
+        let conn = fresh_conn();
+        let cfg = config_with(&[
             ("a", &["https://shared", "https://only-a"]),
             ("b", &["https://shared", "https://only-b"]),
         ]);
-        let (feeds, titles, groups) = build_runtime_state(&c);
+        ensure_seeded(&conn, &cfg).unwrap();
+        let (feeds, titles, groups) = build_runtime_state(&conn).unwrap();
         assert_eq!(feeds.len(), 3, "shared feed counts once");
         assert_eq!(titles.len(), 3);
         assert_eq!(groups[0].feed_indices.len(), 2);
         assert_eq!(groups[1].feed_indices.len(), 2);
-        // Group "b" must reference the same index as group "a" for the shared URL.
         assert_eq!(groups[0].feed_indices[0], groups[1].feed_indices[0]);
+    }
+
+    #[test]
+    fn build_runtime_state_preserves_configured_order() {
+        let conn = fresh_conn();
+        // Use a config whose alphabetical and configured orders differ.
+        let cfg = config_with(&[("zeta", &["https://z"]), ("alpha", &["https://a"])]);
+        ensure_seeded(&conn, &cfg).unwrap();
+        let (_, _, groups) = build_runtime_state(&conn).unwrap();
+        assert_eq!(groups[0].name, "zeta");
+        assert_eq!(groups[1].name, "alpha");
+    }
+
+    #[test]
+    fn remove_group_cascades_to_feed_subscription() {
+        let conn = fresh_conn();
+        ensure_seeded(
+            &conn,
+            &config_with(&[("a", &["https://a1", "https://a2"]), ("b", &["https://b1"])]),
+        )
+        .unwrap();
+        conn.execute("DELETE FROM feed_group WHERE name = 'a'", [])
+            .unwrap();
+        assert_eq!(feed_count(&conn, "a"), 0);
+        assert_eq!(feed_count(&conn, "b"), 1);
     }
 }

@@ -441,8 +441,8 @@ async fn admin_index(
     jar: CookieJar,
     Query(q): Query<AdminQ>,
 ) -> Result<Html<String>, StatusCode> {
-    let cfg = admin::read_config(&state).map_err(|e| {
-        tracing::error!("admin: read_config failed: {e:#}");
+    let groups = admin::list_groups(&state).await.map_err(|e| {
+        tracing::error!("admin: list_groups failed: {e:#}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     let bc = body_classes(&jar, None, None, &state);
@@ -454,7 +454,7 @@ async fn admin_index(
     };
 
     let mut groups_html = String::new();
-    for g in &cfg.rss.groups {
+    for g in &groups {
         write!(
             groups_html,
             "<section class='admin-group'><h2>{name}</h2>",
@@ -523,8 +523,7 @@ async fn admin_add_feed(
 ) -> Redirect {
     let group = f.group.clone();
     let url = f.url.clone();
-    let r = admin::mutate_config(&state, |cfg| admin::add_feed_to_group(cfg, &group, &url)).await;
-    match r {
+    match admin::add_feed_to_group(&state, &group, &url).await {
         Ok(()) => redirect_with_flash(Some(&format!("Added {} to {}.", url, group)), None),
         Err(e) => redirect_with_flash(None, Some(&format!("Could not add feed: {}", e))),
     }
@@ -536,8 +535,7 @@ async fn admin_remove_feed(
 ) -> Redirect {
     let group = f.group.clone();
     let url = f.url.clone();
-    let r = admin::mutate_config(&state, |cfg| admin::remove_feed_from_group(cfg, &group, &url)).await;
-    match r {
+    match admin::remove_feed_from_group(&state, &group, &url).await {
         Ok(()) => redirect_with_flash(Some(&format!("Removed {} from {}.", url, group)), None),
         Err(e) => redirect_with_flash(None, Some(&format!("Could not remove feed: {}", e))),
     }
@@ -548,8 +546,7 @@ async fn admin_add_group(
     Form(f): Form<GroupForm>,
 ) -> Redirect {
     let name = f.name.clone();
-    let r = admin::mutate_config(&state, |cfg| admin::add_group(cfg, &name)).await;
-    match r {
+    match admin::add_group(&state, &name).await {
         Ok(()) => redirect_with_flash(Some(&format!("Created group {}.", name)), None),
         Err(e) => redirect_with_flash(None, Some(&format!("Could not create group: {}", e))),
     }
@@ -560,8 +557,7 @@ async fn admin_remove_group(
     Form(f): Form<RemoveGroupForm>,
 ) -> Redirect {
     let name = f.name.clone();
-    let r = admin::mutate_config(&state, |cfg| admin::remove_group(cfg, &name)).await;
-    match r {
+    match admin::remove_group(&state, &name).await {
         Ok(()) => redirect_with_flash(Some(&format!("Removed group {}.", name)), None),
         Err(e) => redirect_with_flash(None, Some(&format!("Could not remove group: {}", e))),
     }

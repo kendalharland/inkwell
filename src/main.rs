@@ -43,7 +43,6 @@ use anyhow::{Context, Result};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::{
-    admin::build_runtime_state,
     config::ConfigFile,
     jobs::{
         reconcile_schedules, run_purge, run_refresh, worker_loop, PURGE_QUEUE_NAME,
@@ -66,12 +65,6 @@ async fn main() -> Result<()> {
 
     let _log_guard = init_logging(config.scheduler.as_ref().map(|s| s.log_file.as_path()));
 
-    let (feeds, titles_vec, groups) = build_runtime_state(&config);
-    if feeds.is_empty() {
-        anyhow::bail!("no feeds configured");
-    }
-    let feed_titles = RwLock::new(titles_vec);
-
     let timeout_secs: u64 = std::env::var("HTTP_TIMEOUT")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -87,18 +80,15 @@ async fn main() -> Result<()> {
     // same file without long writer stalls. NORMAL sync is sufficient
     // durability for a personal cache — losing a few articles on power
     // loss is benign; they'll be re-extracted on next refresh.
-    conn.execute_batch(
-        "PRAGMA journal_mode=WAL;
-         PRAGMA synchronous=NORMAL;
-         CREATE TABLE IF NOT EXISTS article (
-            id TEXT PRIMARY KEY,
-            url TEXT,
-            title TEXT,
-            html TEXT,
-            fetched_at INTEGER
-         );
-         CREATE INDEX IF NOT EXISTS article_fetched_at_idx ON article(fetched_at);",
-    )?;
+    // foreign_keys is needed so removing a group cascades into
+    // feed_subscription rows.
+    conn.execute_batch(admin::SCHEMA)?;
+    admin::ensure_seeded(&conn, &config)?;
+    let (feeds, titles_vec, groups) = admin::build_runtime_state(&conn)?;
+    if feeds.is_empty() {
+        tracing::info!("no feeds yet — add some via the /admin UI");
+    }
+    let feed_titles = RwLock::new(titles_vec);
 
     let feed_ttl = Duration::from_secs(
         std::env::var("FEED_TTL")
@@ -124,7 +114,6 @@ async fn main() -> Result<()> {
         article_ttl_secs,
         compact_default: config.view.compact_default,
         dark_default: config.view.dark_default,
-        config_path: config_path.clone(),
     });
 
     // ---------- scheduler / workers ----------------------------------------
