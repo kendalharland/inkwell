@@ -11,10 +11,18 @@
 //! [`search_all`]. Results from each are tagged via the `source` field
 //! so the UI could later show provenance if it wanted to.
 
-use anyhow::Result;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{FeedSearchConfig, FeedSearchProvider};
+
+/// Cap on how many redirects [`safe_fetch_text`] will follow before
+/// giving up. Each hop is independently checked against
+/// [`is_disallowed_ip`], so a public→loopback redirect chain is
+/// rejected at the moment it tries to switch hosts.
+const MAX_REDIRECTS: usize = 5;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct SearchResult {
@@ -53,19 +61,20 @@ pub async fn search_all(
 /// Fetch the user's target URL and surface every `<link rel="alternate">`
 /// whose MIME type advertises a feed. Returns absolute URLs even when
 /// the page used relative `href`s.
+///
+/// SSRF defense (see #15): every hop's host is resolved and checked
+/// against a private/loopback/link-local block-list before the request
+/// is issued. Redirects are followed manually so a public→internal
+/// redirect chain is rejected at the moment of the switch — the
+/// underlying `http` client must be built with `Policy::none()` so it
+/// does not auto-follow.
 async fn link_autodiscovery(http: &reqwest::Client, query: &str) -> Result<Vec<SearchResult>> {
     let base = normalize_to_url(query);
-    let html = http
-        .get(&base)
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?;
+    let (final_url, html) = safe_fetch_text(http, &base, MAX_REDIRECTS).await?;
     let doc = scraper::Html::parse_document(&html);
     let selector = scraper::Selector::parse(r#"link[rel="alternate"]"#)
         .map_err(|e| anyhow::anyhow!("selector parse: {e}"))?;
-    let base_url = url::Url::parse(&base).ok();
+    let base_url = url::Url::parse(&final_url).ok();
     let mut out = Vec::new();
     for el in doc.select(&selector) {
         let attrs = el.value();
@@ -90,6 +99,119 @@ async fn link_autodiscovery(http: &reqwest::Client, query: &str) -> Result<Vec<S
         });
     }
     Ok(out)
+}
+
+/// Issue a GET that:
+/// 1. Refuses any URL whose scheme isn't `http`/`https`.
+/// 2. Refuses any URL whose host (literal IP, or DNS A/AAAA records)
+///    sits in a private/loopback/link-local/multicast range.
+/// 3. Manually follows up to `max_hops` redirects, repeating (1) and
+///    (2) on each hop's `Location` so a public 302 can't smuggle the
+///    request into the internal network.
+///
+/// Returns the final URL (post-redirect) so the caller can resolve
+/// relative HTML hrefs against it.
+async fn safe_fetch_text(
+    http: &reqwest::Client,
+    initial: &str,
+    max_hops: usize,
+) -> Result<(String, String)> {
+    let mut url = url::Url::parse(initial).context("parsing initial URL")?;
+    for hop in 0..=max_hops {
+        if !matches!(url.scheme(), "http" | "https") {
+            anyhow::bail!("blocked: non-http(s) scheme {:?}", url.scheme());
+        }
+        let host = url
+            .host_str()
+            .ok_or_else(|| anyhow::anyhow!("URL has no host"))?
+            .to_string();
+        check_host_is_public(&host).await?;
+        let resp = http.get(url.as_str()).send().await?;
+        if !resp.status().is_redirection() {
+            let final_url = url.to_string();
+            let text = resp.error_for_status()?.text().await?;
+            return Ok((final_url, text));
+        }
+        if hop == max_hops {
+            anyhow::bail!("too many redirects ({})", max_hops);
+        }
+        let loc = resp
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|h| h.to_str().ok())
+            .ok_or_else(|| anyhow::anyhow!("redirect without Location"))?;
+        url = url.join(loc).context("joining redirect target")?;
+    }
+    unreachable!("loop bound is max_hops, body returns or bails on every iteration")
+}
+
+/// Resolve `host` and bail if any address sits in a range we never
+/// want a server-side discovery fetch to reach. Handles both literal
+/// IPs (no DNS) and hostnames (resolves via the system stub).
+async fn check_host_is_public(host: &str) -> Result<()> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_disallowed_ip(ip) {
+            anyhow::bail!("blocked private/internal IP {}", ip);
+        }
+        return Ok(());
+    }
+    let addrs = tokio::net::lookup_host((host, 80_u16))
+        .await
+        .with_context(|| format!("dns lookup of {}", host))?;
+    let mut saw_any = false;
+    for sa in addrs {
+        saw_any = true;
+        if is_disallowed_ip(sa.ip()) {
+            anyhow::bail!("{} resolves to disallowed IP {}", host, sa.ip());
+        }
+    }
+    if !saw_any {
+        anyhow::bail!("{} resolved to no addresses", host);
+    }
+    Ok(())
+}
+
+fn is_disallowed_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_disallowed_ipv4(v4),
+        IpAddr::V6(v6) => is_disallowed_ipv6(v6),
+    }
+}
+
+fn is_disallowed_ipv4(v4: Ipv4Addr) -> bool {
+    if v4.is_loopback() || v4.is_private() || v4.is_link_local() {
+        return true;
+    }
+    if v4.is_broadcast() || v4.is_unspecified() || v4.is_multicast() {
+        return true;
+    }
+    if v4.is_documentation() {
+        return true;
+    }
+    // CGNAT 100.64.0.0/10 — `is_shared` is unstable in std.
+    let o = v4.octets();
+    o[0] == 100 && (64..=127).contains(&o[1])
+}
+
+fn is_disallowed_ipv6(v6: Ipv6Addr) -> bool {
+    if v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() {
+        return true;
+    }
+    let s = v6.segments();
+    // fc00::/7 unique local
+    if (s[0] & 0xfe00) == 0xfc00 {
+        return true;
+    }
+    // fe80::/10 link-local
+    if (s[0] & 0xffc0) == 0xfe80 {
+        return true;
+    }
+    // ::ffff:0:0/96 IPv4-mapped — check the embedded v4.
+    if s[0] == 0 && s[1] == 0 && s[2] == 0 && s[3] == 0 && s[4] == 0 && s[5] == 0xffff {
+        let o = v6.octets();
+        return is_disallowed_ipv4(Ipv4Addr::new(o[12], o[13], o[14], o[15]));
+    }
+    false
 }
 
 fn normalize_to_url(q: &str) -> String {
@@ -229,5 +351,81 @@ mod tests {
             </head></html>"##;
         let rs = parse_links(html);
         assert!(rs.is_empty());
+    }
+
+    // ----- SSRF guards (#15) ------------------------------------------------
+
+    fn v4(s: &str) -> Ipv4Addr {
+        s.parse().unwrap()
+    }
+    fn v6(s: &str) -> Ipv6Addr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn ipv4_filter_blocks_private_loopback_and_friends() {
+        // Loopback, RFC1918, link-local, CGNAT, unspecified, broadcast,
+        // multicast, documentation — all the ranges an attacker would
+        // use to pivot inside the host's network.
+        for s in [
+            "127.0.0.1",
+            "127.5.5.5",
+            "10.0.0.1",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.0.1",
+            "169.254.169.254", // AWS/GCP IMDS
+            "100.64.0.1",      // CGNAT
+            "100.127.255.255", // CGNAT
+            "0.0.0.0",
+            "255.255.255.255",
+            "224.0.0.1",
+            "192.0.2.1",  // TEST-NET-1
+            "203.0.113.1", // TEST-NET-3
+        ] {
+            assert!(is_disallowed_ipv4(v4(s)), "{} should be blocked", s);
+        }
+    }
+
+    #[test]
+    fn ipv4_filter_allows_public_addresses() {
+        for s in ["1.1.1.1", "8.8.8.8", "151.101.0.81", "100.63.255.255", "100.128.0.0"] {
+            assert!(!is_disallowed_ipv4(v4(s)), "{} should be allowed", s);
+        }
+    }
+
+    #[test]
+    fn ipv6_filter_blocks_loopback_link_local_and_ula() {
+        for s in [
+            "::1",                                       // loopback
+            "::",                                        // unspecified
+            "fe80::1",                                   // link-local
+            "fc00::1",                                   // ULA
+            "fd12:3456:789a::1",                         // ULA
+            "ff00::1",                                   // multicast
+            "::ffff:127.0.0.1",                          // v4-mapped loopback
+            "::ffff:10.0.0.5",                           // v4-mapped private
+            "::ffff:169.254.169.254",                    // v4-mapped IMDS
+        ] {
+            assert!(is_disallowed_ipv6(v6(s)), "{} should be blocked", s);
+        }
+    }
+
+    #[test]
+    fn ipv6_filter_allows_globally_routable_addresses() {
+        for s in [
+            "2001:4860:4860::8888", // Google DNS
+            "2606:4700::1111",      // Cloudflare DNS
+            "2400:cb00::",
+        ] {
+            assert!(!is_disallowed_ipv6(v6(s)), "{} should be allowed", s);
+        }
+    }
+
+    #[tokio::test]
+    async fn check_host_rejects_literal_loopback_without_dns() {
+        assert!(check_host_is_public("127.0.0.1").await.is_err());
+        assert!(check_host_is_public("169.254.169.254").await.is_err());
+        assert!(check_host_is_public("::1").await.is_err());
     }
 }

@@ -275,6 +275,7 @@ mod tests {
             feed_titles: tokio::sync::RwLock::new(Vec::new()),
             groups: tokio::sync::RwLock::new(Vec::new()),
             http: reqwest::Client::new(),
+            discovery_http: reqwest::Client::new(),
             feed_cache: tokio::sync::RwLock::new(HashMap::new()),
             db: tokio::sync::Mutex::new(rusqlite::Connection::open_in_memory().unwrap()),
             feed_ttl: std::time::Duration::from_secs(60),

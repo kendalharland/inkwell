@@ -42,6 +42,12 @@ pub struct AppState {
     /// admin reload-helper rebuilds both atomically.
     pub groups: RwLock<Vec<GroupInfo>>,
     pub http: reqwest::Client,
+    /// Separate client used by the feed-discovery autocomplete. Built
+    /// with `redirect(Policy::none())` so [`crate::feed_search`] can
+    /// follow redirects manually and re-check each hop against the
+    /// SSRF block-list. Do not use this client for anything that
+    /// expects automatic redirect handling (e.g. article extraction).
+    pub discovery_http: reqwest::Client,
     /// Parsed-feed cache keyed by feed index. Eviction is purely TTL-based.
     pub feed_cache: RwLock<HashMap<usize, CachedFeed>>,
     /// Connection used for the article cache. Honker has its own connection

@@ -716,7 +716,9 @@ async fn admin_feed_search(
     State(state): State<Arc<AppState>>,
     Query(q): Query<FeedSearchQ>,
 ) -> Json<Vec<feed_search::SearchResult>> {
-    Json(feed_search::search_all(&state.http, &state.feed_search, &q.q).await)
+    // discovery_http is the redirect-disabled client; feed_search
+    // re-checks each hop's host against the SSRF block-list.
+    Json(feed_search::search_all(&state.discovery_http, &state.feed_search, &q.q).await)
 }
 
 #[cfg(test)]

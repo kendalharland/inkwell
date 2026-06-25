@@ -75,6 +75,14 @@ async fn main() -> Result<()> {
         .user_agent("Mozilla/5.0 (compatible; inkwell-rss-reader/0.1)")
         .timeout(Duration::from_secs(timeout_secs))
         .build()?;
+    // Used only by the feed-discovery autocomplete (#15). Redirects
+    // are followed manually in `feed_search` so each hop's host can
+    // be re-checked against the SSRF block-list.
+    let discovery_http = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (compatible; inkwell-rss-reader/0.1)")
+        .timeout(Duration::from_secs(timeout_secs))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
 
     let db_path = std::env::var("CACHE_DB").unwrap_or_else(|_| "reader_cache.sqlite".into());
     let conn = rusqlite::Connection::open(&db_path)?;
@@ -110,6 +118,7 @@ async fn main() -> Result<()> {
         feed_titles,
         groups: RwLock::new(groups),
         http,
+        discovery_http,
         feed_cache: RwLock::new(HashMap::new()),
         db: Mutex::new(conn),
         feed_ttl,
