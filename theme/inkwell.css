@@ -87,22 +87,16 @@ code, pre, kbd, .hljs {
   --color-scheme: light;
 }
 
-/* Two-column layout: article body on the left, sticky right-rail TOC
-   on the right. The TOC lives inside <main> (theme/inkwell.js moves
-   the article's existing children into a wrapper, then drops the TOC
-   in as the second grid item) so it shares the same horizontal space
-   mdBook already allots — no fight with the sidebar or with the
-   viewport math fixed-positioning forces.                            */
+/* Article body is reserved 14rem of right margin (12rem TOC + 2rem
+   gap). The TOC itself uses `position: fixed` and tracks the right
+   edge of <main> via the calc()s further down, so it stays put when
+   the user scrolls the page.                                         */
 .content main {
   max-width: 72rem;
   margin: 0 auto;
   padding: 1rem 1.75rem 4rem;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 12rem;
-  column-gap: 2rem;
-  align-items: start;
 }
-.content main > #main-body { min-width: 0; }
+.content main > #main-body { margin-right: 14rem; min-width: 0; }
 
 /* Body links: subtle underline rather than bold color. */
 .content a:link,
@@ -142,15 +136,26 @@ table th { font-family: var(--inkwell-sans); text-align: left; }
 /* ---- per-page right-rail TOC (built in theme/inkwell.js) ---------------- */
 
 #page-toc {
-  position: sticky;
-  top: 1.25rem;
-  align-self: start;
-  max-height: calc(100vh - 2.5rem);
+  position: fixed;
+  /* Below mdBook's sticky menu bar (var --menu-bar-height = 50px). */
+  top: calc(var(--menu-bar-height, 50px) + 1.5rem);
+  width: 12rem;
+  max-height: calc(100vh - var(--menu-bar-height, 50px) - 3rem);
   overflow-y: auto;
   font-family: var(--inkwell-sans);
   font-size: 13px;
   line-height: 1.5;
   color: #6a6660;
+  /* Right edge of TOC tracks the right edge of <main> (centered with
+     max-width 72rem). Clamp so we never push past 1.5rem viewport
+     padding on smaller screens. */
+  right: max(1.5rem, calc((100vw - 72rem) / 2 + 1.75rem));
+}
+/* When mdBook's sidebar is visible, .content is shifted right by the
+   sidebar width; recalibrate the TOC's right offset accordingly so it
+   keeps aligning with main's right edge. */
+html.sidebar-visible #page-toc {
+  right: max(1.5rem, calc((100vw - var(--sidebar-width, 0px) - 72rem) / 2 + 1.75rem));
 }
 
 #page-toc h4 {
@@ -194,12 +199,10 @@ table th { font-family: var(--inkwell-sans); text-align: left; }
 #page-toc li.toc-h3 a { padding-left: 24px; font-size: 12px; }
 
 /* Below this width the article body shrinks past readability when
-   sharing a row with the TOC. Collapse to single-column and hide. */
+   sharing space with the TOC; drop the reserved right-margin and hide
+   the TOC entirely. */
 @media (max-width: 1024px) {
-  .content main {
-    grid-template-columns: minmax(0, 1fr);
-    column-gap: 0;
-  }
+  .content main > #main-body { margin-right: 0; }
   #page-toc { display: none; }
 }
 
