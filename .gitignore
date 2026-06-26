@@ -1,4 +1,5 @@
 /target
+/book
 /.claude
 /config.yaml
 /reader_cache.sqlite

@@ -1,0 +1,12 @@
+[book]
+title = "inkwell"
+description = "A small self-hosted RSS/Atom reader for Kindles and other e-ink devices."
+authors = ["Kendal Harland"]
+language = "en"
+src = "docs"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+git-repository-url = "https://codeberg.org/kendal/inkwell"
+edit-url-template = "https://codeberg.org/kendal/inkwell/_edit/main/docs/{path}"

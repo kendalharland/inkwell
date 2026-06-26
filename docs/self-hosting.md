@@ -1,29 +1,54 @@
 # Self-hosting
 
-inkwell is a single binary that serves plain HTTP on one port. It
-does not terminate TLS itself; everything past "running on the LAN"
-relies on a reverse proxy in front of it.
+inkwell is meant to run as a small, always-on service on a home
+server, a VPS, or any other Docker host. This page gets you from
+"clean box" to "Kindle is reading the feeds" in a few minutes.
 
-## What stays in `/data`
+## docker-compose
 
-When run from the Docker image, anything that should survive container
-recreation goes under `/data`:
+Drop this in a `docker-compose.yml`:
 
-| File                    | Purpose                                          |
-| ----------------------- | ------------------------------------------------ |
-| `reader_cache.sqlite`   | Article cache + bookmarks + group/feed state.    |
-| `reader_cache.sqlite-{wal,shm}` | SQLite WAL / shared-memory files.        |
-| `inkwell.log` (if enabled) | Rolling log file for scheduler + worker output. |
-| `gemini.cert.pem`, `gemini.key.pem` (if enabled) | Generated on first boot; Gemini clients TOFU these, so keep them stable. |
+```yaml
+services:
+  inkwell:
+    image: inkwell:latest
+    build: .                # or pull from a registry once published
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - inkwell-data:/data
 
-Mount a host directory or named volume at `/data`. The default `Dockerfile`
-declares `VOLUME ["/data"]` so Docker will refuse to throw the path away
-on container removal.
+volumes:
+  inkwell-data:
+```
 
-## Reverse proxy
+Put your `config.yaml` next to it (start from
+`config.example.yaml`), then:
 
-Recommended pattern: terminate TLS at nginx, Caddy, or Traefik;
-forward to inkwell on its plain HTTP port.
+```sh
+docker compose up -d
+```
+
+Browse to `http://<host>:8080/` — that's it. The named volume keeps
+your article cache, bookmarks, and admin-edited feed list alive
+across upgrades.
+
+## Behind a reverse proxy (HTTPS)
+
+You almost certainly want HTTPS in front of it. Two snippets — pick
+whichever flavor your stack already runs.
+
+### Caddy
+
+```caddyfile
+inkwell.example.com {
+    reverse_proxy localhost:8080
+}
+```
+
+Caddy handles the certs automatically. Done.
 
 ### nginx
 
@@ -35,63 +60,43 @@ server {
     ssl_certificate     /etc/letsencrypt/live/inkwell.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/inkwell.example.com/privkey.pem;
 
-    # The Kindle browser sometimes drops Connection: close on requests;
-    # keep this generous so streamed responses aren't cut short.
-    proxy_read_timeout 60s;
-
     location / {
-        proxy_pass http://127.0.0.1:5050;
+        proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 }
 ```
 
-### Caddy
+## Locking down the admin page
 
-```caddyfile
-inkwell.example.com {
-    reverse_proxy 127.0.0.1:5050
-}
-```
+The `/admin` route is currently unauthenticated. If you put inkwell
+on the open internet, gate `/admin/*` at your reverse proxy — HTTP
+Basic auth at the nginx/Caddy layer is enough for most setups, or
+front the whole thing with authelia / Authentik / similar.
 
-## Hardening notes
-
-inkwell's `/admin` surface is currently **unauthenticated**. If you
-expose the server to the open internet, gate `/admin/*` at the
-reverse-proxy layer (HTTP Basic auth, authelia, etc.) — anyone who
-can reach `/admin` can modify your feed list. See the discussion on
-[#14] for the planned device-pairing sidecar that fronts the reader
-surface too.
-
-The `/admin/feed-search` autocomplete endpoint resolves user-typed
-URLs from the server's network. The handler blocks loopback, RFC1918,
-link-local, CGNAT, ULA, and v4-mapped-private IPs (per #15), but if
-you're running on a host with sensitive internal services the
-defense-in-depth move is the same: keep `/admin/*` behind an
-auth gateway.
+The companion [`inkwell-pair`](../pair/README.md) sidecar handles
+the "log this new Kindle in without typing a password" flow that
+pairs nicely with that.
 
 ## Backups
 
-The article cache + bookmarks + feed/group state all live in
-`reader_cache.sqlite`. Back it up with the standard SQLite Online
-Backup API, or copy the file while inkwell is stopped:
+Everything that matters lives in `inkwell-data`. A nightly cron that
+copies the volume off-host is plenty:
 
 ```sh
-docker exec inkwell sqlite3 /data/reader_cache.sqlite \
+docker compose exec inkwell sqlite3 /data/reader_cache.sqlite \
   ".backup '/data/backup-$(date +%Y%m%d).sqlite'"
 ```
 
-A nightly cron that runs the `.backup` and rotates files in `/data/`
-(or copies them off the host) is enough for personal use.
+…then `rsync` the resulting file somewhere safe.
 
-## Updates
+## Upgrades
 
-`docker pull` + `docker run` is the upgrade path; the binary doesn't
-write any state outside `/data`, so a re-deploy preserves your feeds,
-bookmarks, and article cache. Schema changes (`CREATE TABLE IF NOT
-EXISTS`, `CREATE INDEX IF NOT EXISTS`) run on every start and are
-idempotent.
+```sh
+docker compose pull   # or: docker compose build --pull
+docker compose up -d
+```
 
-[#14]: https://codeberg.org/kendal/inkwell/issues/14
-[#15]: https://codeberg.org/kendal/inkwell/issues/15
+The schema migrates itself on start, so an upgrade is just a
+container swap.

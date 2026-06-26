@@ -33,10 +33,10 @@ rss:
 | `rss.groups[].name`    | string          | Label shown in the Groups view.                                                                                                          |
 | `rss.groups[].feeds`   | string[]        | Feed URLs. A URL listed in multiple groups still resolves to one cache row.                                                              |
 
-**First-run only.** Since [#11] landed, feeds and groups live in the
-SQLite cache, not in the YAML. The `rss:` section is read once at first
-startup to seed the DB; after that, the admin UI is authoritative and
-edits to YAML are ignored. To re-seed, wipe `reader_cache.sqlite`.
+**First-run only.** Feeds and groups live in the SQLite cache, not
+the YAML. The `rss:` section is read once at first startup to seed
+the DB; after that, the admin UI is authoritative and edits to YAML
+are ignored. To re-seed, wipe `reader_cache.sqlite`.
 
 ## `scheduler` (optional)
 
@@ -55,7 +55,7 @@ scheduler:
 | ------------------------------ | -------- | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | `scheduler.refresh`            | string   | required           | Cron expression. Accepts 5-field (`min hr dom mon dow`), 6-field with leading seconds, or `@every <duration>`.     |
 | `scheduler.purge`              | string   | required           | Cron expression for the article-purge job. Same format as `refresh`.                                                |
-| `scheduler.article_ttl_days`   | u32      | required           | Articles older than this are deleted by the purge job. **Bookmarked articles are exempt** (since [#10]).            |
+| `scheduler.article_ttl_days`   | u32      | required           | Articles older than this are deleted by the purge job. **Bookmarked articles are exempt.**                          |
 | `scheduler.log_file`           | path     | `./inkwell.log`    | Rolling log file for scheduler + worker output. Created if missing.                                                  |
 
 ## `view` (optional)
@@ -112,9 +112,9 @@ feed_search:
 | `link_auto_discovery` | Built-in. GETs the user's URL and scrapes `<link rel="alternate">` tags advertising RSS / Atom / JSON-feed payloads. Default.                  |
 | `feedsearch`          | feedsearch.dev passthrough. Currently fronted by a Cloudflare challenge that blocks server-side requests; off by default, kept for completeness. |
 
-SSRF defense (see [#15]): every hop's host is resolved and rejected if
-it sits in a private/loopback/link-local range. Redirects are followed
-manually so a public→internal redirect can't smuggle past the check.
+SSRF defense: every hop's host is resolved and rejected if it sits in
+a private/loopback/link-local range. Redirects are followed manually
+so a public→internal redirect can't smuggle past the check.
 
 ## Environment variables
 
@@ -125,7 +125,3 @@ manually so a public→internal redirect can't smuggle past the check.
 | `FEED_TTL`     | `600`                    | Per-feed in-memory cache TTL in seconds. Lower = more refetches; higher = staler.    |
 | `HTTP_TIMEOUT` | `15`                     | Outbound HTTP request timeout in seconds (both feed fetch and article extraction).    |
 | `RUST_LOG`     | `info`                   | Standard `tracing-subscriber` filter (e.g. `inkwell=debug,rusqlite=warn`).            |
-
-[#10]: https://codeberg.org/kendal/inkwell/issues/10
-[#11]: https://codeberg.org/kendal/inkwell/issues/11
-[#15]: https://codeberg.org/kendal/inkwell/issues/15

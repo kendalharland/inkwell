@@ -28,17 +28,9 @@ By default the server listens on `0.0.0.0:5050`. From your Kindle or
 any other device on the same LAN, browse to
 `http://<host>:5050/`.
 
-### Build prerequisites
-
-| Crate            | What it needs                                                        |
-| ---------------- | -------------------------------------------------------------------- |
-| `rusqlite`       | `bundled` feature, so no system libsqlite3 required.                 |
-| `reqwest`        | `rustls-tls`, so no system OpenSSL required.                         |
-| `readability`    | `default-features = false` to avoid pulling reqwest 0.11 + openssl. |
-| Everything else  | Pure Rust.                                                           |
-
-On a Debian/Ubuntu builder you only need `pkg-config` and
-`ca-certificates`. The supplied `Dockerfile` does exactly that.
+No system libraries are required at runtime. On a Debian/Ubuntu
+build host you only need `pkg-config` and `ca-certificates` (already
+covered by the supplied `Dockerfile`).
 
 ## Docker
 

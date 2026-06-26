@@ -10,14 +10,7 @@ article so taps render in a few milliseconds.
 │  RSS / Atom URLs │ →  │  inkwell server  │ →  │  Kindle browser  │
 │  (config.yaml)   │    │  HTTP, port 5050 │    │  http://host:5050│
 └──────────────────┘    └──────────────────┘    └──────────────────┘
-                             │
-                             └─→ honker scheduler in same SQLite file
-                                 (refresh + article-purge cron jobs)
 ```
-
-> Screenshot — TODO (tracked in [#4][issue-4]).
-
-[issue-4]: https://codeberg.org/kendal/inkwell/issues/4
 
 ## Why
 
@@ -35,8 +28,6 @@ Full docs live under [`docs/`](docs/index.md):
   persistence, backups.
 - [Configuration reference](docs/configuration.md) — every YAML
   field and environment variable.
-- [Extensions](docs/extensions.md) — placeholder; surface not yet
-  designed.
 
 ## Companion service: `inkwell-pair`
 
