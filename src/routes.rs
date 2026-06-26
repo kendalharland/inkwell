@@ -11,7 +11,7 @@ use axum::{
     Json, Router,
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar};
-use html_escape::encode_text;
+use html_escape::{encode_single_quoted_attribute, encode_text};
 use serde::Deserialize;
 use url::Url;
 
@@ -443,6 +443,9 @@ fn render_item_bookmark_button(
     from: &str,
     bookmarked: bool,
 ) -> String {
+    // Attribute values are single-quoted; use the attribute-specific
+    // encoder so an apostrophe in the title/url/from can't close the
+    // attribute (#17).
     let (action, glyph, label) = if bookmarked {
         ("/unbookmark", "★", "Remove bookmark")
     } else {
@@ -457,9 +460,9 @@ fn render_item_bookmark_button(
          </form>",
         action = action,
         iid = iid,
-        url = encode_text(url),
-        title = encode_text(title),
-        from = encode_text(from),
+        url = encode_single_quoted_attribute(url),
+        title = encode_single_quoted_attribute(title),
+        from = encode_single_quoted_attribute(from),
         label = label,
         glyph = glyph,
     )

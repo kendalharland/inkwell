@@ -15,7 +15,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use html_escape::encode_text;
+use html_escape::{encode_single_quoted_attribute, encode_text};
 
 use crate::{feeds::EntryView, template::render};
 
@@ -34,6 +34,11 @@ pub fn url_encode(s: &str) -> String {
 /// on its own after the feed has rolled the entry off. `from` rides
 /// back into the redirect so the user lands on the same page+pagination
 /// they were viewing.
+///
+/// All attribute interpolations use `encode_single_quoted_attribute`
+/// because the form's attributes are single-quoted — plain `encode_text`
+/// leaves `'` unescaped and a feed title containing one (e.g.
+/// "What's new") would close the attribute and corrupt the row (#17).
 pub fn render_bookmark_button(e: &EntryView, from_path: &str, bookmarked: bool) -> String {
     let (action, glyph, label) = if bookmarked {
         ("/unbookmark", "★", "Remove bookmark")
@@ -49,9 +54,9 @@ pub fn render_bookmark_button(e: &EntryView, from_path: &str, bookmarked: bool) 
          </form>",
         action = action,
         iid = e.iid,
-        url = encode_text(&e.url),
-        title = encode_text(&e.title),
-        from = encode_text(from_path),
+        url = encode_single_quoted_attribute(&e.url),
+        title = encode_single_quoted_attribute(&e.title),
+        from = encode_single_quoted_attribute(from_path),
         label = label,
         glyph = glyph,
     )
@@ -290,5 +295,36 @@ mod tests {
         assert!(out.contains("☆"), "expected outline star, got: {}", out);
         assert!(out.contains("action='/bookmark/aaaa'"));
         assert!(!out.contains("action='/unbookmark/aaaa'"));
+    }
+
+    #[test]
+    fn render_bookmark_button_escapes_apostrophe_in_title_and_url() {
+        // Regression for #17: plain encode_text leaves `'` alone, so
+        // an apostrophe in a feed title would close the single-quoted
+        // value attribute, truncate the stored title, and create an
+        // attribute-injection sink. The fix uses
+        // encode_single_quoted_attribute, which escapes `'` to its
+        // hex entity.
+        let e = EntryView {
+            iid: "deadbeefdeadbeef".into(),
+            title: "What's new ' onfocus='alert(1)".into(),
+            host: "x".into(),
+            url: "https://example.com/?q=it's".into(),
+            published_ts: 0,
+            feed_title: "F".into(),
+        };
+        let out = render_bookmark_button(&e, "/", false);
+        // No bare apostrophe should appear inside any value=... range —
+        // every `'` between two attribute quotes must be the entity.
+        for v in [
+            "value='https://example.com/?q=it&#x27;s'",
+            "value='What&#x27;s new &#x27; onfocus=&#x27;alert(1)'",
+        ] {
+            assert!(out.contains(v), "missing expected escaped attr {}\nin: {}", v, out);
+        }
+        // The form structure must still be intact: every `value=` must
+        // immediately precede a single quote (not a bare apostrophe
+        // from the title leaking in).
+        assert_eq!(out.matches("value='").count(), 3, "form attrs torn: {}", out);
     }
 }
