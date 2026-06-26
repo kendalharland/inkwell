@@ -30,6 +30,14 @@ pub fn item_id(link: &str) -> String {
     hex.chars().take(16).collect()
 }
 
+/// Strict shape check matching what [`item_id`] emits. Used by route
+/// handlers that accept an iid in the URL path so an attacker can't
+/// inject markup or shell-like sequences through the path parameter
+/// (see #16).
+pub fn is_valid_iid(s: &str) -> bool {
+    s.len() == 16 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+}
+
 /// One outbound HTTP + parse. No caching, no retry — caller decides.
 pub async fn fetch_feed_once(http: &reqwest::Client, url: &str) -> Result<ParsedFeed> {
     let resp = http.get(url).send().await?.error_for_status()?;
@@ -222,6 +230,39 @@ mod tests {
         let id = item_id("https://example.com/article");
         assert_eq!(id.len(), 16);
         assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn is_valid_iid_accepts_item_id_output() {
+        // What item_id emits must always pass — otherwise a fresh feed
+        // entry would be unbookmarkable.
+        for link in [
+            "https://example.com/a",
+            "https://example.com/article?id=1",
+            "http://x",
+        ] {
+            assert!(is_valid_iid(&item_id(link)));
+        }
+    }
+
+    #[test]
+    fn is_valid_iid_rejects_html_injection_and_other_shapes() {
+        // The path param goes into HTML attributes; reject any shape
+        // that could carry a quote, tag, or anything outside lowercase
+        // hex.
+        for bad in [
+            "",
+            "abc",                 // too short
+            "abcdef0123456789a",   // too long
+            "ABCDEF0123456789",    // uppercase
+            "ghijklmnopqrstuv",    // non-hex chars
+            "0123456789abcde\"",   // quote
+            "0123456789abc<\"\">", // tag bait
+            "../../../etc/passwd",
+            "0123 456789abcdef",   // space
+        ] {
+            assert!(!is_valid_iid(bad), "{:?} should be rejected", bad);
+        }
     }
 
     fn content_with_body(s: impl Into<String>) -> feed_rs::model::Content {

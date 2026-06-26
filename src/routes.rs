@@ -19,7 +19,7 @@ use crate::{
     admin, bookmarks,
     extract::{extract_url, sanitize_images, BLOCKED_MARKER},
     feed_search,
-    feeds::{collect_entries, ensure_feeds, entry_full_html, item_id},
+    feeds::{collect_entries, ensure_feeds, entry_full_html, is_valid_iid, item_id},
     state::AppState,
     view::{now_secs, page, render_entries, url_encode},
 };
@@ -330,6 +330,12 @@ async fn one_item(
     AxumPath(iid): AxumPath<String>,
     Query(q): Query<ItemQ>,
 ) -> Result<Html<String>, StatusCode> {
+    // Reject any iid that doesn't match the shape `feeds::item_id`
+    // produces. Without this, an attacker-controlled path param can
+    // reach the bookmark form's HTML interpolation (see #16).
+    if !is_valid_iid(&iid) {
+        return Err(StatusCode::NOT_FOUND);
+    }
     let bc = body_classes(&jar, q.compact, q.theme.as_deref(), &state);
     let back = q
         .from
@@ -474,7 +480,10 @@ async fn add_bookmark(
     headers: HeaderMap,
     AxumPath(iid): AxumPath<String>,
     Form(f): Form<BookmarkForm>,
-) -> Redirect {
+) -> Result<Redirect, StatusCode> {
+    if !is_valid_iid(&iid) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let url = f.url.trim();
     let title = f.title.trim();
     if !url.is_empty() && !title.is_empty() {
@@ -483,7 +492,7 @@ async fn add_bookmark(
             tracing::error!("bookmark add failed for {}: {e:#}", iid);
         }
     }
-    Redirect::to(&back_url(&headers, f.from.as_deref()))
+    Ok(Redirect::to(&back_url(&headers, f.from.as_deref())))
 }
 
 async fn remove_bookmark(
@@ -491,14 +500,17 @@ async fn remove_bookmark(
     headers: HeaderMap,
     AxumPath(iid): AxumPath<String>,
     Form(f): Form<BookmarkForm>,
-) -> Redirect {
+) -> Result<Redirect, StatusCode> {
+    if !is_valid_iid(&iid) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     {
         let conn = state.db.lock().await;
         if let Err(e) = bookmarks::remove(&conn, &iid) {
             tracing::error!("bookmark remove failed for {}: {e:#}", iid);
         }
     }
-    Redirect::to(&back_url(&headers, f.from.as_deref()))
+    Ok(Redirect::to(&back_url(&headers, f.from.as_deref())))
 }
 
 async fn read_later(
