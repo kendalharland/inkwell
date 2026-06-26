@@ -1,10 +1,10 @@
 # Configuration reference
 
-inkwell is configured with a single YAML file whose path is passed as
-the only CLI argument. A handful of environment variables tune runtime
-knobs that aren't worth a YAML field.
+inkwell reads a single YAML file at startup — pass its path as the
+only argument. A few environment variables cover the runtime knobs
+that don't really belong in YAML.
 
-The full surface:
+A complete config has five top-level blocks; only `rss` is required:
 
 ```yaml
 rss: …          # required
@@ -13,9 +13,6 @@ view: …         # optional
 gemini: …       # optional
 feed_search: …  # optional, defaults to link_auto_discovery
 ```
-
-Each property below shows up in the order: **what it is** → **what it
-does** → **example**.
 
 ## `rss` (required)
 

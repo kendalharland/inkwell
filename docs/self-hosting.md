@@ -37,8 +37,8 @@ across upgrades.
 
 ## Behind a reverse proxy (HTTPS)
 
-You almost certainly want HTTPS in front of it. Two snippets — pick
-whichever flavor your stack already runs.
+You almost certainly want HTTPS in front of it. Snippets for the two
+most common stacks follow; adapt for whatever proxy you actually run.
 
 ### Caddy
 

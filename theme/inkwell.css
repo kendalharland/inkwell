@@ -1,11 +1,17 @@
 /* ---- typography ---------------------------------------------------------
-   Same fonts inkwell itself serves to the Kindle: Source Serif Pro for
-   body, Inter for UI / headings, JetBrains Mono for code. The system
-   fallbacks keep load failures from breaking the look.                    */
+   * Body: Source Serif Pro — the same humanist serif inkwell itself
+     serves to the Kindle, so the docs site reads like part of the
+     product.
+   * Headings: Bricolage Grotesque — a modern editorial sans that
+     gives titles a newspaper / paper-page feel.
+   * Code: JetBrains Mono.                                                  */
+
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Source+Serif+Pro:ital,wght@0,400;0,600;1,400&display=swap");
 
 :root {
   --inkwell-serif: "Source Serif Pro", "Iowan Old Style", "Charter", Georgia, "Times New Roman", serif;
   --inkwell-sans:  "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --inkwell-display: "Bricolage Grotesque", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --inkwell-mono:  "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -16,15 +22,20 @@ html, body, .content {
   letter-spacing: -.005em;
 }
 
-h1, h2, h3, h4, h5, h6,
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--inkwell-display);
+  font-weight: 600;
+  letter-spacing: -.015em;
+}
+
 .menu-title, .sidebar, nav, .nav-chapters {
   font-family: var(--inkwell-sans);
   letter-spacing: -.005em;
 }
 
-h1 { font-size: 2em; margin: .8em 0 .5em; line-height: 1.2; }
-h2 { font-size: 1.5em; margin: 1.4em 0 .5em; line-height: 1.25; }
-h3 { font-size: 1.18em; margin: 1.2em 0 .35em; }
+h1 { font-size: 2.25em; font-weight: 700; margin: .6em 0 .5em; line-height: 1.15; letter-spacing: -.025em; }
+h2 { font-size: 1.55em; margin: 1.4em 0 .5em; line-height: 1.2; }
+h3 { font-size: 1.2em; margin: 1.2em 0 .35em; }
 
 code, pre, kbd, .hljs {
   font-family: var(--inkwell-mono);
@@ -76,8 +87,9 @@ code, pre, kbd, .hljs {
   --color-scheme: light;
 }
 
-/* Slightly tighter content column so longer lines stay readable. */
-.content main { max-width: 44rem; margin: 0 auto; padding: 1rem 1.5rem 4rem; }
+/* Content column. ~58rem keeps lines around the 70-90ch sweet spot
+   with our serif body at 17px while leaving the right rail room. */
+.content main { max-width: 58rem; margin: 0 auto; padding: 1rem 1.75rem 4rem; }
 
 /* Body links: subtle underline rather than bold color. */
 .content a:link,
@@ -182,4 +194,11 @@ table th { font-family: var(--inkwell-sans); text-align: left; }
   border-radius: 4px;
   box-shadow: 0 1px 8px rgba(0,0,0,.04);
   margin: 1em 0;
+}
+
+/* ---- hide the theme picker (light-only) --------------------------------- */
+
+#theme-toggle,
+.theme-popup {
+  display: none !important;
 }

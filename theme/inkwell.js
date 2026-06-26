@@ -5,6 +5,26 @@
 // reader is currently in.
 
 (function () {
+  // Force the light theme on every page load. The picker is hidden via
+  // CSS, but anyone with a previously-saved dark choice in localStorage
+  // would otherwise still get the dark palette.
+  try {
+    localStorage.setItem("mdbook-theme", "light");
+  } catch (e) {
+    /* private mode: nothing we can do, just continue */
+  }
+  function applyLight(el) {
+    if (!el) return;
+    ["navy", "rust", "coal", "ayu"].forEach(function (c) { el.classList.remove(c); });
+    el.classList.add("light");
+  }
+  applyLight(document.documentElement);
+  if (document.body) {
+    applyLight(document.body);
+  } else {
+    document.addEventListener("DOMContentLoaded", function () { applyLight(document.body); });
+  }
+
   function build() {
     var main = document.querySelector("main");
     if (!main) {
