@@ -10,3 +10,5 @@ default-theme = "light"
 preferred-dark-theme = "navy"
 git-repository-url = "https://codeberg.org/kendal/inkwell"
 edit-url-template = "https://codeberg.org/kendal/inkwell/_edit/main/docs/{path}"
+additional-css = ["theme/inkwell.css"]
+additional-js = ["theme/inkwell.js"]

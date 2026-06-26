@@ -1,0 +1,185 @@
+/* ---- typography ---------------------------------------------------------
+   Same fonts inkwell itself serves to the Kindle: Source Serif Pro for
+   body, Inter for UI / headings, JetBrains Mono for code. The system
+   fallbacks keep load failures from breaking the look.                    */
+
+:root {
+  --inkwell-serif: "Source Serif Pro", "Iowan Old Style", "Charter", Georgia, "Times New Roman", serif;
+  --inkwell-sans:  "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --inkwell-mono:  "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+}
+
+html, body, .content {
+  font-family: var(--inkwell-serif);
+  font-size: 17px;
+  line-height: 1.6;
+  letter-spacing: -.005em;
+}
+
+h1, h2, h3, h4, h5, h6,
+.menu-title, .sidebar, nav, .nav-chapters {
+  font-family: var(--inkwell-sans);
+  letter-spacing: -.005em;
+}
+
+h1 { font-size: 2em; margin: .8em 0 .5em; line-height: 1.2; }
+h2 { font-size: 1.5em; margin: 1.4em 0 .5em; line-height: 1.25; }
+h3 { font-size: 1.18em; margin: 1.2em 0 .35em; }
+
+code, pre, kbd, .hljs {
+  font-family: var(--inkwell-mono);
+  font-size: 14px;
+}
+
+/* ---- color palette ------------------------------------------------------
+   Light / e-reader-inspired. Warm off-white background, charcoal text,
+   muted accent. Dark mode left as mdBook's default since e-ink readers
+   live in the light.                                                      */
+
+.light {
+  --bg: #fafaf6;
+  --fg: #2a2826;
+  --sidebar-bg: #f1ede4;
+  --sidebar-fg: #4a4744;
+  --sidebar-active: #2a2826;
+  --sidebar-non-existant: #8a857c;
+  --sidebar-spacer: #d8d3c8;
+  --scrollbar: #c8c3b6;
+
+  --icons: #8a857c;
+  --icons-hover: #2a2826;
+
+  --links: #2a2826;
+  --inline-code-color: #5a4a30;
+  --theme-popup-bg: #fafaf6;
+  --theme-popup-border: #d8d3c8;
+  --theme-hover: #ece7da;
+
+  --quote-bg: #f3eee2;
+  --quote-border: #c8c3b6;
+
+  --warning-border: #c0a060;
+
+  --table-border-color: #d8d3c8;
+  --table-header-bg: #f1ede4;
+  --table-alternate-bg: #f5f1e8;
+
+  --searchbar-border-color: #c8c3b6;
+  --searchbar-bg: #fafaf6;
+  --searchbar-fg: #2a2826;
+  --searchbar-shadow-color: rgba(0,0,0,.04);
+  --searchresults-header-fg: #5a5752;
+  --searchresults-border-color: #d8d3c8;
+  --searchresults-li-bg: #f3eee2;
+  --search-mark-bg: #f0d670;
+
+  --color-scheme: light;
+}
+
+/* Slightly tighter content column so longer lines stay readable. */
+.content main { max-width: 44rem; margin: 0 auto; padding: 1rem 1.5rem 4rem; }
+
+/* Body links: subtle underline rather than bold color. */
+.content a:link,
+.content a:visited { color: var(--links); text-decoration-color: #b3ad9f; text-underline-offset: 2px; }
+.content a:hover { text-decoration-thickness: 2px; }
+
+/* Inline code: paper-toned panel, no border. */
+.content code:not(pre code) {
+  background: #f0ebde;
+  padding: .08em .35em;
+  border-radius: .2em;
+  color: var(--inline-code-color);
+}
+
+/* Block code: a touch off-bg, no harsh outline. */
+pre, pre code {
+  background: #f4efe2;
+  border-radius: 4px;
+}
+pre { padding: .9em 1em; line-height: 1.5; }
+
+/* Tables: airy and printable. */
+table { border-collapse: collapse; margin: 1em 0; }
+table th, table td { padding: .4em .8em; border-bottom: 1px solid var(--table-border-color); }
+table th { font-family: var(--inkwell-sans); text-align: left; }
+
+/* Blockquotes: scholarly italic. */
+.content blockquote {
+  border-left: 3px solid var(--quote-border);
+  padding: .2em 0 .2em 1em;
+  margin: 1em 0;
+  color: #5a5752;
+  font-style: italic;
+  background: transparent;
+}
+
+/* ---- per-page right-rail TOC (built in theme/inkwell.js) ---------------- */
+
+#page-toc {
+  position: fixed;
+  top: 86px;
+  right: 1.5rem;
+  width: 14rem;
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+  font-family: var(--inkwell-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  color: #6a6660;
+}
+
+#page-toc h4 {
+  margin: 0 0 .6em;
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #8a857c;
+  font-weight: 600;
+}
+
+#page-toc ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-left: 1px solid #d8d3c8;
+}
+
+#page-toc li { margin: 0; padding: 0; }
+
+#page-toc a {
+  display: block;
+  padding: 3px 12px;
+  margin-left: -1px;
+  border-left: 2px solid transparent;
+  color: #6a6660;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#page-toc a:hover { color: var(--fg); }
+
+#page-toc a.active {
+  color: var(--fg);
+  font-weight: 600;
+  border-left-color: var(--fg);
+}
+
+#page-toc li.toc-h3 a { padding-left: 24px; font-size: 12px; }
+
+/* Hide when content + sidebar already crowd the viewport. */
+@media (max-width: 1280px) {
+  #page-toc { display: none; }
+}
+
+/* ---- landing screenshot ------------------------------------------------- */
+
+.content main img {
+  max-width: 100%;
+  border: 1px solid var(--table-border-color);
+  border-radius: 4px;
+  box-shadow: 0 1px 8px rgba(0,0,0,.04);
+  margin: 1em 0;
+}
