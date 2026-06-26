@@ -132,12 +132,12 @@ table th { font-family: var(--inkwell-sans); text-align: left; }
   position: fixed;
   top: 86px;
   right: 1.5rem;
-  width: 14rem;
+  width: 18rem;
   max-height: calc(100vh - 110px);
   overflow-y: auto;
   font-family: var(--inkwell-sans);
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.5;
   color: #6a6660;
 }
 
@@ -161,14 +161,14 @@ table th { font-family: var(--inkwell-sans); text-align: left; }
 
 #page-toc a {
   display: block;
-  padding: 3px 12px;
+  padding: 4px 12px;
   margin-left: -1px;
   border-left: 2px solid transparent;
   color: #6a6660;
   text-decoration: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Long headings wrap onto a second line instead of being truncated. */
+  white-space: normal;
+  word-break: break-word;
 }
 
 #page-toc a:hover { color: var(--fg); }
@@ -181,8 +181,10 @@ table th { font-family: var(--inkwell-sans); text-align: left; }
 
 #page-toc li.toc-h3 a { padding-left: 24px; font-size: 12px; }
 
-/* Hide when content + sidebar already crowd the viewport. */
-@media (max-width: 1280px) {
+/* Hide when content + sidebar would crowd the viewport. The 58rem
+   content column + 18rem TOC + the left sidebar need ~1500px to fit
+   side-by-side without overlap. */
+@media (max-width: 1500px) {
   #page-toc { display: none; }
 }
 
