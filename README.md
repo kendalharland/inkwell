@@ -28,9 +28,15 @@ single, predictable HTML shape that every Kindle browser can render.
 
 ## Documentation
 
-Full docs live under [`docs/`](docs/index.md) — installation,
-self-hosting (reverse proxy, TLS, backups), the full configuration
-reference, and the placeholder extensions guide.
+Full docs live under [`docs/`](docs/index.md):
+
+- [Installation](docs/installation.md) — source build and Docker.
+- [Self-hosting](docs/self-hosting.md) — reverse proxy, TLS,
+  persistence, backups.
+- [Configuration reference](docs/configuration.md) — every YAML
+  field and environment variable.
+- [Extensions](docs/extensions.md) — placeholder; surface not yet
+  designed.
 
 ## Companion service: `inkwell-pair`
 
@@ -40,30 +46,32 @@ new Kindle without typing a password on it" flows when sitting behind
 authelia or a similar gateway. See [`pair/README.md`](pair/README.md)
 for the env-var surface and the Docker recipe.
 
-## Install
+## Quick start
 
-You need a Rust toolchain (1.80+).
+The fastest path is Docker:
+
+```sh
+docker build -t inkwell:latest .
+docker run --rm -p 8080:8080 \
+  -v "$PWD/config.yaml:/app/config.yaml:ro" \
+  -v inkwell-data:/data \
+  inkwell:latest
+```
+
+Or build from source (Rust 1.80+) and run the binary directly:
 
 ```sh
 git clone https://codeberg.org/kendal/inkwell.git
 cd inkwell
 cargo build --release
-```
-
-The binary is `./target/release/inkwell`.
-
-## Quick start
-
-```sh
-cp config.example.yaml config.yaml
-# edit config.yaml — add feeds, groups, and (optionally) a scheduler block
+cp config.example.yaml config.yaml   # edit before running
 ./target/release/inkwell config.yaml
 ```
 
-The server listens on `0.0.0.0:5050`. From your Kindle, browse to
-`http://<your-LAN-IP>:5050/`.
+The server listens on `0.0.0.0:5050` from source or `:8080` in the
+Docker image. From your Kindle, browse to `http://<host>:<port>/`.
 
-## Configuration
+## Configuration at a glance
 
 ```yaml
 rss:
@@ -81,32 +89,17 @@ scheduler:
   refresh: "@every 10m"      # cron or "@every Ns"
   purge: "0 3 * * *"         # 5-field cron, also accepts 6-field with leading seconds
   article_ttl_days: 30
-  log_file: ./inkwell.log
 
 # Optional. UI density.
 view:
   compact_default: false
 ```
 
-| Key                          | Meaning                                                                   |
-| ---------------------------- | ------------------------------------------------------------------------- |
-| `rss.groups[].name`          | Group label shown in the Groups view.                                     |
-| `rss.groups[].feeds`         | List of feed URLs. Same feed in two groups → one cache entry.             |
-| `scheduler.refresh`          | Cron expression for the feed-fetch + article pre-extract job.             |
-| `scheduler.purge`            | Cron expression for the article-purge job.                                |
-| `scheduler.article_ttl_days` | Articles older than this are deleted by the purge job.                    |
-| `scheduler.log_file`         | Path for the rolling log (errors + per-job summaries).                    |
-| `view.compact_default`       | Initial density for new visitors. Users can toggle via the **Density** link in nav. |
-
-### Environment variables
-
-| Var            | Default                    | Effect                              |
-| -------------- | -------------------------- | ----------------------------------- |
-| `PORT`         | `5050`                     | HTTP listen port.                   |
-| `CACHE_DB`     | `./reader_cache.sqlite`    | Path to the SQLite cache file.      |
-| `FEED_TTL`     | `600`                      | Per-feed in-memory cache TTL (seconds). |
-| `HTTP_TIMEOUT` | `15`                       | Outbound HTTP timeout (seconds).    |
-| `RUST_LOG`     | `info`                     | Standard `tracing` filter.          |
+The `rss:` block is read once on first start to seed the SQLite store;
+after that, edit feeds and groups via the `/admin` page. The full
+schema — including the `gemini:` and `feed_search:` blocks and every
+environment variable — lives in
+[`docs/configuration.md`](docs/configuration.md).
 
 ## How it works
 
@@ -115,6 +108,8 @@ Three views, accessible from the top nav:
 * **All stories** — every entry from every feed, paginated and sorted newest-first.
 * **Feeds** — one row per configured feed.
 * **Groups** — drill in to see a merged listing for one group.
+* **Read later** — articles you've bookmarked (☆ → ★) from any of
+  the above.
 
 Tapping a story:
 
@@ -130,6 +125,9 @@ Images are sanitized for the Kindle browser — JPEG/PNG/GIF are kept (with
 an empty `alt=""` added when missing); WebP/AVIF/SVG/data-URIs are
 replaced with a `[alt text]` fallback. See [#1][issue-1] for the rationale.
 
+Bookmarks are pinned past the purge TTL, so a saved article doesn't
+silently vanish even if its feed has rolled the entry off.
+
 [issue-1]: https://codeberg.org/kendal/inkwell/issues/1
 
 ## Connect from your usual RSS reader
@@ -140,25 +138,6 @@ can subscribe to the **same source URLs** you put in `config.yaml`.
 
 If you'd like inkwell to also serve outbound feeds, weigh in on an
 issue.
-
-## Layout / structure
-
-```
-src/
-  main.rs        composition + entry point
-  config.rs      YAML schema
-  state.rs       AppState shared across handlers + jobs
-  feeds.rs       fetch + parse + in-memory cache + EntryView
-  extract.rs     readability + image sanitization + blocked-site fallback
-  view.rs        Kindle-targeted HTML rendering + pagination
-  routes.rs      axum handlers
-  jobs.rs        honker scheduler integration; refresh + purge handlers
-  logging.rs     stderr + file logging
-  template.rs    tiny {{var}} substituter
-  templates/     *.html and style.css, embedded via include_str!()
-```
-
-Run `cargo test` for the unit-test suite (no network, no fixtures).
 
 ## License
 
