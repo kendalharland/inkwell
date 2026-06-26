@@ -1,8 +1,9 @@
 // Per-page right-rail "On this page" TOC. mdBook ships a left sidebar
 // of chapters but no within-page navigation; this script scans the
-// rendered main content for h2/h3 headings and builds a fixed-position
-// aside out of them, with a scrollspy that highlights the section the
-// reader is currently in.
+// rendered main content for h2/h3 headings, wraps the existing article
+// content in a #main-body div so <main> can act as a two-column grid,
+// and appends a sticky aside in the right column with a scrollspy that
+// highlights the section the reader is currently in.
 
 (function () {
   // Force the light theme on every page load. The picker is hidden via
@@ -40,6 +41,23 @@
     if (existing) {
       existing.parentNode.removeChild(existing);
     }
+    var existingBody = document.getElementById("main-body");
+    if (existingBody) {
+      // Re-running on the same page (SPA-like nav doesn't happen in
+      // mdBook, but be defensive): unwrap before re-wrapping.
+      while (existingBody.firstChild) {
+        main.insertBefore(existingBody.firstChild, existingBody);
+      }
+      existingBody.parentNode.removeChild(existingBody);
+    }
+
+    // Wrap the existing article content in a left-column container.
+    var body = document.createElement("div");
+    body.id = "main-body";
+    while (main.firstChild) {
+      body.appendChild(main.firstChild);
+    }
+    main.appendChild(body);
 
     var toc = document.createElement("aside");
     toc.id = "page-toc";
@@ -61,7 +79,7 @@
       ul.appendChild(li);
     });
     toc.appendChild(ul);
-    document.body.appendChild(toc);
+    main.appendChild(toc);
 
     // Scrollspy: mark whichever heading is closest to the top of the
     // viewport as active. IntersectionObserver with a top-anchored

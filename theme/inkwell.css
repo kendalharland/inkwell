@@ -87,9 +87,22 @@ code, pre, kbd, .hljs {
   --color-scheme: light;
 }
 
-/* Content column. ~58rem keeps lines around the 70-90ch sweet spot
-   with our serif body at 17px while leaving the right rail room. */
-.content main { max-width: 58rem; margin: 0 auto; padding: 1rem 1.75rem 4rem; }
+/* Two-column layout: article body on the left, sticky right-rail TOC
+   on the right. The TOC lives inside <main> (theme/inkwell.js moves
+   the article's existing children into a wrapper, then drops the TOC
+   in as the second grid item) so it shares the same horizontal space
+   mdBook already allots — no fight with the sidebar or with the
+   viewport math fixed-positioning forces.                            */
+.content main {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1rem 1.75rem 4rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  column-gap: 2.5rem;
+  align-items: start;
+}
+.content main > #main-body { min-width: 0; }
 
 /* Body links: subtle underline rather than bold color. */
 .content a:link,
@@ -129,11 +142,10 @@ table th { font-family: var(--inkwell-sans); text-align: left; }
 /* ---- per-page right-rail TOC (built in theme/inkwell.js) ---------------- */
 
 #page-toc {
-  position: fixed;
-  top: 86px;
-  right: 1.5rem;
-  width: 18rem;
-  max-height: calc(100vh - 110px);
+  position: sticky;
+  top: 1.25rem;
+  align-self: start;
+  max-height: calc(100vh - 2.5rem);
   overflow-y: auto;
   font-family: var(--inkwell-sans);
   font-size: 13px;
@@ -181,10 +193,13 @@ table th { font-family: var(--inkwell-sans); text-align: left; }
 
 #page-toc li.toc-h3 a { padding-left: 24px; font-size: 12px; }
 
-/* Hide when content + sidebar would crowd the viewport. The 58rem
-   content column + 18rem TOC + the left sidebar need ~1500px to fit
-   side-by-side without overlap. */
-@media (max-width: 1500px) {
+/* Below this width the article body shrinks past readability when
+   sharing a row with the TOC. Collapse to single-column and hide. */
+@media (max-width: 1024px) {
+  .content main {
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
+  }
   #page-toc { display: none; }
 }
 
