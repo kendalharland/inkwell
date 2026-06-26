@@ -101,35 +101,6 @@ schema — including the `gemini:` and `feed_search:` blocks and every
 environment variable — lives in
 [`docs/configuration.md`](docs/configuration.md).
 
-## How it works
-
-Three views, accessible from the top nav:
-
-* **All stories** — every entry from every feed, paginated and sorted newest-first.
-* **Feeds** — one row per configured feed.
-* **Groups** — drill in to see a merged listing for one group.
-* **Read later** — articles you've bookmarked (☆ → ★) from any of
-  the above.
-
-Tapping a story:
-
-1. Looks up the article in the SQLite cache (populated by the
-   background refresh job — usually a hit).
-2. Falls back to live extraction with the
-   [`readability`](https://crates.io/crates/readability) crate.
-3. If the source site refuses the request (Akamai/Cloudflare/paywall),
-   the page shows a clear "open original" link. Blocked responses are
-   not cached so a retry can succeed if the site's mood changes.
-
-Images are sanitized for the Kindle browser — JPEG/PNG/GIF are kept (with
-an empty `alt=""` added when missing); WebP/AVIF/SVG/data-URIs are
-replaced with a `[alt text]` fallback. See [#1][issue-1] for the rationale.
-
-Bookmarks are pinned past the purge TTL, so a saved article doesn't
-silently vanish even if its feed has rolled the entry off.
-
-[issue-1]: https://codeberg.org/kendal/inkwell/issues/1
-
 ## Connect from your usual RSS reader
 
 inkwell consumes RSS — it does not currently re-expose RSS for other
