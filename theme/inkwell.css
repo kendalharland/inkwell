@@ -98,8 +98,8 @@ code, pre, kbd, .hljs {
   margin: 0 auto;
   padding: 1rem 1.75rem 4rem;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 17rem;
-  column-gap: 2.5rem;
+  grid-template-columns: minmax(0, 1fr) 12rem;
+  column-gap: 2rem;
   align-items: start;
 }
 .content main > #main-body { min-width: 0; }
