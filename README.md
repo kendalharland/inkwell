@@ -32,6 +32,14 @@ Full docs live under [`docs/`](docs/index.md) — installation,
 self-hosting (reverse proxy, TLS, backups), the full configuration
 reference, and the placeholder extensions guide.
 
+## Companion service: `inkwell-pair`
+
+Optional sidecar that mints 6-digit pairing codes and sets a session
+cookie on the device that redeems one — designed for "log in this
+new Kindle without typing a password on it" flows when sitting behind
+authelia or a similar gateway. See [`pair/README.md`](pair/README.md)
+for the env-var surface and the Docker recipe.
+
 ## Install
 
 You need a Rust toolchain (1.80+).

@@ -1,0 +1,20 @@
+[package]
+name = "inkwell-pair"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "inkwell-pair"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+rand = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
