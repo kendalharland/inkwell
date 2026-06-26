@@ -26,6 +26,12 @@ not — heavy JavaScript, paywall walls, slow loads, broken layouts.
 inkwell sits between your RSS feeds and your e-reader and serves a
 single, predictable HTML shape that every Kindle browser can render.
 
+## Documentation
+
+Full docs live under [`docs/`](docs/index.md) — installation,
+self-hosting (reverse proxy, TLS, backups), the full configuration
+reference, and the placeholder extensions guide.
+
 ## Install
 
 You need a Rust toolchain (1.80+).
