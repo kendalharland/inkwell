@@ -336,6 +336,25 @@ mod tests {
     }
 
     #[test]
+    fn validate_feed_url_blocks_all_dangerous_schemes() {
+        // Regression for #18: `POST /bookmark/{iid}` was missing a
+        // scheme check, so `javascript:` / `data:` slipped into the
+        // `bookmark.url` column and later rendered in <a href> on the
+        // article page. The bookmark handler now reuses
+        // `validate_feed_url`, so this set has to stay rejected.
+        for bad in [
+            "javascript:alert(document.cookie)",
+            "JAVASCRIPT:alert(1)", // case still doesn't start with http(s)://
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox(1)",
+            "file:///etc/passwd",
+            "//evil.com/x", // scheme-relative — no http(s):// prefix
+        ] {
+            assert!(validate_feed_url(bad).is_err(), "{:?} should be rejected", bad);
+        }
+    }
+
+    #[test]
     fn validate_group_name_rejects_empty() {
         assert!(validate_group_name("   ").is_err());
         assert_eq!(validate_group_name("  tech  ").unwrap(), "tech");

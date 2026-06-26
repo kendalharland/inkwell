@@ -487,9 +487,19 @@ async fn add_bookmark(
     if !is_valid_iid(&iid) {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let url = f.url.trim();
     let title = f.title.trim();
-    if !url.is_empty() && !title.is_empty() {
+    // Reject anything that isn't an http(s) URL. Without this,
+    // `javascript:`/`data:` slip in and `/item/<iid>` later renders
+    // them in `<a href="…">`; encode_text doesn't strip the scheme,
+    // so clicking the host link runs the attacker's script (#18).
+    let url = match admin::validate_feed_url(&f.url) {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::warn!("bookmark add rejected for {}: {e}", iid);
+            return Ok(Redirect::to(&back_url(&headers, f.from.as_deref())));
+        }
+    };
+    if !title.is_empty() {
         let conn = state.db.lock().await;
         if let Err(e) = bookmarks::add(&conn, &iid, url, title, now_secs()) {
             tracing::error!("bookmark add failed for {}: {e:#}", iid);
