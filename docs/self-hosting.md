@@ -1,12 +1,11 @@
 # Self-hosting
 
-inkwell is meant to run as a small, always-on service on a home
-server, a VPS, or any other Docker host. This page gets you from
-"clean box" to "Kindle is reading the feeds" in a few minutes.
+inkwell is designed to run as a long-lived service on a home server,
+VPS, or any other Docker host.
 
 ## docker-compose
 
-Drop this in a `docker-compose.yml`:
+Put the following in a `docker-compose.yml`:
 
 ```yaml
 services:
@@ -24,21 +23,22 @@ volumes:
   inkwell-data:
 ```
 
-Put your `config.yaml` next to it (start from
-`config.example.yaml`), then:
+Place `config.yaml` next to it (start from `config.example.yaml`),
+then start the stack:
 
 ```sh
 docker compose up -d
 ```
 
-Browse to `http://<host>:8080/` — that's it. The named volume keeps
-your article cache, bookmarks, and admin-edited feed list alive
-across upgrades.
+The server is then reachable at `http://<host>:8080/`. The
+`inkwell-data` named volume holds the article cache, bookmarks, and
+admin-edited feed list, and persists across container recreation.
 
-## Behind a reverse proxy (HTTPS)
+## Behind a reverse proxy
 
-You almost certainly want HTTPS in front of it. Snippets for the two
-most common stacks follow; adapt for whatever proxy you actually run.
+To serve inkwell over HTTPS, place a reverse proxy in front of it.
+Configuration snippets for two common proxies follow; adapt them for
+whichever proxy is in use.
 
 ### Caddy
 
@@ -48,7 +48,7 @@ inkwell.example.com {
 }
 ```
 
-Caddy handles the certs automatically. Done.
+Caddy provisions and renews TLS certificates automatically.
 
 ### nginx
 
@@ -68,28 +68,26 @@ server {
 }
 ```
 
-## Locking down the admin page
+## Restricting access to the admin page
 
-The `/admin` route is currently unauthenticated. If you put inkwell
-on the open internet, gate `/admin/*` at your reverse proxy — HTTP
-Basic auth at the nginx/Caddy layer is enough for most setups, or
-front the whole thing with authelia / Authentik / similar.
+The `/admin` route is unauthenticated. When inkwell is exposed to the
+public internet, gate `/admin/*` at the reverse proxy — for example
+with HTTP Basic auth in nginx or Caddy, or via an external identity
+provider such as authelia or Authentik.
 
-The companion [`inkwell-pair`](../pair/README.md) sidecar handles
-the "log this new Kindle in without typing a password" flow that
-pairs nicely with that.
+For pairing new devices without typing a password, see the
+[`inkwell-pair`](../pair/README.md) sidecar.
 
 ## Backups
 
-Everything that matters lives in `inkwell-data`. A nightly cron that
-copies the volume off-host is plenty:
+All persistent state is stored in the `inkwell-data` volume. Back it
+up with a periodic SQLite `.backup` to a path inside the volume, then
+copy the resulting file off-host:
 
 ```sh
 docker compose exec inkwell sqlite3 /data/reader_cache.sqlite \
   ".backup '/data/backup-$(date +%Y%m%d).sqlite'"
 ```
-
-…then `rsync` the resulting file somewhere safe.
 
 ## Upgrades
 
@@ -98,5 +96,4 @@ docker compose pull   # or: docker compose build --pull
 docker compose up -d
 ```
 
-The schema migrates itself on start, so an upgrade is just a
-container swap.
+Schema migrations run automatically on startup.

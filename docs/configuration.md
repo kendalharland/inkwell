@@ -1,8 +1,8 @@
 # Configuration reference
 
-inkwell reads a single YAML file at startup — pass its path as the
-only argument. A few environment variables cover the runtime knobs
-that don't really belong in YAML.
+inkwell reads a single YAML file at startup; pass its path as the
+only argument. A small set of runtime knobs are configured via
+environment variables instead.
 
 A complete config has five top-level blocks; only `rss` is required:
 

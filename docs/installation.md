@@ -1,10 +1,10 @@
 # Installation
 
-If you already have Docker, skip down. Otherwise build from source.
+inkwell can be built from source or run as a Docker container.
 
 ## From source
 
-You'll need Rust 1.80 or newer.
+Requires Rust 1.80 or newer.
 
 ```sh
 git clone https://codeberg.org/kendal/inkwell.git
@@ -12,8 +12,8 @@ cd inkwell
 cargo build --release
 ```
 
-That produces `./target/release/inkwell`. Copy the example config,
-edit it, and run the binary against it:
+The binary is written to `./target/release/inkwell`. Copy the example
+config, edit it, and pass its path to the binary:
 
 ```sh
 cp config.example.yaml config.yaml
@@ -21,13 +21,12 @@ cp config.example.yaml config.yaml
 ./target/release/inkwell config.yaml
 ```
 
-The server listens on `0.0.0.0:5050` by default. From your Kindle or
-any other device on the same LAN, point a browser at
-`http://<host>:5050/`.
+The server listens on `0.0.0.0:5050` by default and is reachable from
+any device on the same network at `http://<host>:5050/`.
 
-inkwell needs no system libraries at runtime. On a Debian or Ubuntu
-build host you'll want `pkg-config` and `ca-certificates`, which the
-shipped `Dockerfile` already installs.
+No system libraries are required at runtime. On a Debian or Ubuntu
+build host, `pkg-config` and `ca-certificates` are required for the
+build; both are installed by the shipped `Dockerfile`.
 
 ## Docker
 
@@ -38,12 +37,13 @@ docker run --rm -p 8080:8080 \
   inkwell:latest
 ```
 
-The image listens on port 8080 and keeps its SQLite cache (plus any
-Gemini cert and key) in `/data`, which is a named volume — your
-articles, bookmarks, and admin-edited feed list all survive container
-recreation.
+The image listens on port 8080 and stores its SQLite cache (plus any
+Gemini cert and key) in `/data`, which is exposed as a named volume.
+Articles, bookmarks, and admin-edited feed lists persist across
+container recreation.
 
-To use your own config, mount it read-only at `/app/config.yaml`:
+To override the bundled config, mount one read-only at
+`/app/config.yaml`:
 
 ```sh
 docker run --rm -p 8080:8080 \
@@ -52,5 +52,5 @@ docker run --rm -p 8080:8080 \
   inkwell:latest
 ```
 
-Once it's running locally, head over to [self-hosting](self-hosting.md)
-to put it behind a reverse proxy.
+See [self-hosting](self-hosting.md) for reverse-proxy, backup, and
+upgrade procedures.
