@@ -4,7 +4,7 @@
 use std::{fmt::Write as _, sync::Arc};
 
 use axum::{
-    extract::{Form, Path as AxumPath, Query, State},
+    extract::{Form, Multipart, Path as AxumPath, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect},
     routing::{get, post},
@@ -88,6 +88,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/admin/feed-search", get(admin_feed_search))
         .route("/admin/group/add", post(admin_add_group))
         .route("/admin/group/remove", post(admin_remove_group))
+        .route("/admin/import-opml", post(admin_import_opml))
         .with_state(state)
 }
 
@@ -731,6 +732,71 @@ async fn admin_remove_group(
     }
 }
 
+/// Upper bound on the OPML file we'll parse. A typical reader's export
+/// is well under 100 KiB; 1 MiB is generous. Enforced in the handler
+/// because axum's `DefaultBodyLimit` does not apply to multipart bodies.
+const OPML_MAX_BYTES: usize = 1024 * 1024;
+
+async fn admin_import_opml(
+    State(state): State<Arc<AppState>>,
+    mut multipart: Multipart,
+) -> Redirect {
+    let mut xml: Option<String> = None;
+    loop {
+        match multipart.next_field().await {
+            Ok(Some(field)) => {
+                if field.name() != Some("opml") {
+                    continue;
+                }
+                let bytes = match field.bytes().await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return redirect_with_flash(
+                            None,
+                            Some(&format!("OPML upload failed: {}", e)),
+                        );
+                    }
+                };
+                if bytes.is_empty() {
+                    return redirect_with_flash(None, Some("OPML file is empty."));
+                }
+                if bytes.len() > OPML_MAX_BYTES {
+                    return redirect_with_flash(None, Some("OPML file too large (max 1 MiB)."));
+                }
+                xml = match std::str::from_utf8(&bytes) {
+                    Ok(s) => Some(s.to_string()),
+                    Err(_) => {
+                        return redirect_with_flash(None, Some("OPML file is not valid UTF-8."));
+                    }
+                };
+                break;
+            }
+            Ok(None) => break,
+            Err(e) => {
+                return redirect_with_flash(None, Some(&format!("OPML upload failed: {}", e)));
+            }
+        }
+    }
+    let Some(xml) = xml else {
+        return redirect_with_flash(None, Some("No OPML file selected."));
+    };
+
+    match admin::import_opml(&state, &xml).await {
+        Ok(s) => {
+            let msg = format!(
+                "Imported {feeds} feed(s) into {groups} new group(s); \
+                 {dup} duplicate(s), {bad} invalid skipped.",
+                feeds = s.feeds_added,
+                groups = s.groups_created,
+                dup = s.skipped_duplicate,
+                bad = s.skipped_invalid,
+            );
+            redirect_with_flash(Some(&msg), None)
+        }
+        Err(e) => redirect_with_flash(None, Some(&format!("OPML import failed: {}", e))),
+    }
+}
+
 #[derive(Deserialize)]
 struct FeedSearchQ {
     #[serde(default)]
@@ -1066,5 +1132,166 @@ mod tests {
             "expected group heading, got: {}",
             html
         );
+    }
+
+    // ----- OPML import route tests ----------------------------------------
+
+    const MP_BOUNDARY: &str = "----InkwellOpmlTestBoundary";
+
+    /// Build a multipart/form-data body containing a single `opml` part.
+    /// `field_name` parameterizes the form field so we can also test the
+    /// "no opml field" rejection branch.
+    fn multipart_body(field_name: &str, file_contents: &[u8]) -> Vec<u8> {
+        let header = format!(
+            "--{b}\r\n\
+             Content-Disposition: form-data; name=\"{name}\"; filename=\"feeds.opml\"\r\n\
+             Content-Type: application/xml\r\n\r\n",
+            b = MP_BOUNDARY,
+            name = field_name,
+        );
+        let trailer = format!("\r\n--{}--\r\n", MP_BOUNDARY);
+        let mut out = Vec::with_capacity(header.len() + file_contents.len() + trailer.len());
+        out.extend_from_slice(header.as_bytes());
+        out.extend_from_slice(file_contents);
+        out.extend_from_slice(trailer.as_bytes());
+        out
+    }
+
+    fn post_multipart(path: &str, body: Vec<u8>) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(path)
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={}", MP_BOUNDARY),
+            )
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    fn opml_doc(body: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+            <opml version="2.0"><head><title>x</title></head><body>{body}</body></opml>"#
+        )
+    }
+
+    fn location_of(resp: &axum::response::Response) -> String {
+        resp.headers()
+            .get("location")
+            .expect("redirect missing Location header")
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn import_opml_endpoint_imports_feeds_and_redirects_with_ok_flash() {
+        let state = fresh_app_state();
+        let xml = opml_doc(
+            r#"<outline text="Tech">
+                <outline xmlUrl="https://a.example/rss"/>
+              </outline>"#,
+        );
+        let req = post_multipart("/admin/import-opml", multipart_body("opml", xml.as_bytes()));
+        let resp = router(state.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let loc = location_of(&resp);
+        assert!(loc.starts_with("/admin?ok="), "got Location: {}", loc);
+        // And the new feed shows up on the admin page.
+        let resp = router(state.clone()).oneshot(get("/admin")).await.unwrap();
+        let html = body_string(resp).await;
+        assert!(html.contains("https://a.example/rss"));
+        assert!(html.contains(">Tech</h2>"));
+    }
+
+    #[tokio::test]
+    async fn import_opml_endpoint_creates_uncategorized_group_for_loose_feeds() {
+        let state = fresh_app_state();
+        let xml = opml_doc(r#"<outline xmlUrl="https://loose.example/rss"/>"#);
+        let req = post_multipart("/admin/import-opml", multipart_body("opml", xml.as_bytes()));
+        let resp = router(state.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let resp = router(state.clone()).oneshot(get("/admin")).await.unwrap();
+        let html = body_string(resp).await;
+        assert!(html.contains(">Uncategorized</h2>"));
+    }
+
+    #[tokio::test]
+    async fn import_opml_endpoint_missing_file_field_redirects_with_err_flash() {
+        let state = fresh_app_state();
+        // Field name is "wrong-name" so the handler never finds the
+        // opml part — should redirect with err, not 500.
+        let req = post_multipart(
+            "/admin/import-opml",
+            multipart_body("wrong-name", b"<opml/>"),
+        );
+        let resp = router(state.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let loc = location_of(&resp);
+        assert!(loc.starts_with("/admin?err="), "got Location: {}", loc);
+        assert!(state.feeds.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn import_opml_endpoint_empty_file_redirects_with_err_flash() {
+        let state = fresh_app_state();
+        let req = post_multipart("/admin/import-opml", multipart_body("opml", b""));
+        let resp = router(state.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let loc = location_of(&resp);
+        assert!(loc.starts_with("/admin?err="), "got Location: {}", loc);
+    }
+
+    #[tokio::test]
+    async fn import_opml_endpoint_malformed_xml_redirects_with_err_flash() {
+        let state = fresh_app_state();
+        let bad = br#"<?xml version="1.0"?><opml><body><outline xmlUrl="x"></body></opml>"#;
+        let req = post_multipart("/admin/import-opml", multipart_body("opml", bad));
+        let resp = router(state.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let loc = location_of(&resp);
+        assert!(loc.starts_with("/admin?err="), "got Location: {}", loc);
+        assert!(state.feeds.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn import_opml_endpoint_oversize_body_redirects_with_err_flash() {
+        // 1.5 MiB payload: above the handler's 1 MiB OPML cap, below
+        // axum's 2 MiB router-default body limit so we exercise the
+        // handler's own check (and not the framework's truncation
+        // error path, which produces a less helpful flash).
+        let state = fresh_app_state();
+        let big = vec![b'A'; (3 * 1024 * 1024) / 2];
+        let req = post_multipart("/admin/import-opml", multipart_body("opml", &big));
+        let resp = router(state.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let loc = location_of(&resp);
+        assert!(loc.starts_with("/admin?err="), "got Location: {}", loc);
+        assert!(
+            loc.contains("too") && loc.contains("large"),
+            "expected 'too large' in flash, got: {}",
+            loc
+        );
+        assert!(state.feeds.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn import_opml_endpoint_rejects_unsafe_schemes_silently() {
+        // The handler still redirects with `ok` (the import succeeded —
+        // zero feeds added, three skipped), but no row hits the DB.
+        let state = fresh_app_state();
+        let xml = opml_doc(
+            r#"<outline text="Bad">
+                <outline xmlUrl="javascript:alert(1)"/>
+                <outline xmlUrl="file:///etc/passwd"/>
+                <outline xmlUrl="ftp://example.com/feed"/>
+               </outline>"#,
+        );
+        let req = post_multipart("/admin/import-opml", multipart_body("opml", xml.as_bytes()));
+        let resp = router(state.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        // Group was created (it had outlines) but no feeds landed.
+        assert!(state.feeds.read().await.is_empty());
     }
 }

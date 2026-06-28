@@ -8,6 +8,14 @@
   <button type="submit">Add group</button>
 </form>
 </section>
+<section class="admin-group">
+<h2>Import OPML</h2>
+<form method="post" action="/admin/import-opml" enctype="multipart/form-data" class="inline">
+  <input type="file" name="opml" accept=".opml,.xml,application/xml,text/xml" required>
+  <button type="submit">Import</button>
+</form>
+<p class="meta">Groups are merged by name; existing feeds are kept. Ungrouped entries go to <strong>Uncategorized</strong>.</p>
+</section>
 <datalist id="feed-suggestions"></datalist>
 <script>
 // Bind every group's "Add feed" input to the shared <datalist> and

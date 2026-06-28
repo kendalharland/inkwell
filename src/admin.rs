@@ -249,6 +249,97 @@ pub async fn remove_group(state: &AppState, name: &str) -> Result<()> {
     apply_from_db(state).await
 }
 
+/// Summary returned by [`import_opml`] for the admin flash message and
+/// for tests that need to assert per-category counts.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ImportSummary {
+    pub groups_created: usize,
+    pub feeds_added: usize,
+    pub skipped_invalid: usize,
+    pub skipped_duplicate: usize,
+}
+
+/// Import OPML into the DB and rebuild runtime state. Semantics:
+///
+/// * Groups already present in the DB are reused; the import only
+///   appends feeds. Re-importing the same OPML is therefore a no-op
+///   (every URL collides and lands in `skipped_duplicate`).
+/// * Feed URLs go through [`validate_feed_url`] so the OPML can't
+///   smuggle in `javascript:` / `file://` schemes — this is the same
+///   allow-list the single-feed admin form uses.
+/// * The whole import runs in one SQLite transaction; if a row fails
+///   to insert for any reason other than collision/scheme, the entire
+///   import is rolled back and no state change is published to the
+///   in-memory `AppState`.
+pub async fn import_opml(state: &AppState, xml: &str) -> Result<ImportSummary> {
+    let entries = crate::opml::parse(xml)?;
+    let mut summary = ImportSummary::default();
+    if entries.is_empty() {
+        return Ok(summary);
+    }
+
+    {
+        let conn = state.db.lock().await;
+        let tx = conn.unchecked_transaction()?;
+        for entry in entries {
+            let url = match validate_feed_url(&entry.url) {
+                Ok(u) => u.to_string(),
+                Err(_) => {
+                    summary.skipped_invalid += 1;
+                    continue;
+                }
+            };
+            // Group label normalization mirrors `validate_group_name`;
+            // we can't call it directly because the parser already
+            // trimmed and we want to count empties as `skipped_invalid`
+            // rather than aborting the whole transaction.
+            let group = entry.group.trim();
+            if group.is_empty() {
+                summary.skipped_invalid += 1;
+                continue;
+            }
+
+            let exists: bool = tx
+                .query_row("SELECT 1 FROM feed_group WHERE name = ?1", [group], |_| {
+                    Ok(true)
+                })
+                .unwrap_or(false);
+            if !exists {
+                let pos: i64 = tx.query_row(
+                    "SELECT COALESCE(MAX(position)+1, 0) FROM feed_group",
+                    [],
+                    |r| r.get(0),
+                )?;
+                tx.execute(
+                    "INSERT INTO feed_group (name, position) VALUES (?1, ?2)",
+                    params![group, pos],
+                )?;
+                summary.groups_created += 1;
+            }
+
+            let pos: i64 = tx.query_row(
+                "SELECT COALESCE(MAX(position)+1, 0) FROM feed_subscription \
+                 WHERE group_name = ?1",
+                [group],
+                |r| r.get(0),
+            )?;
+            let inserted = tx.execute(
+                "INSERT OR IGNORE INTO feed_subscription (group_name, url, position) \
+                 VALUES (?1, ?2, ?3)",
+                params![group, &url, pos],
+            )?;
+            if inserted == 0 {
+                summary.skipped_duplicate += 1;
+            } else {
+                summary.feeds_added += 1;
+            }
+        }
+        tx.commit()?;
+    }
+    apply_from_db(state).await?;
+    Ok(summary)
+}
+
 /// Read the full current config back out of the DB. Used by the admin
 /// UI to render the list of groups and their feeds; doesn't touch the
 /// in-memory `AppState` because the admin renderer can serve straight
@@ -600,6 +691,252 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("does not exist"));
+    }
+
+    // ----- OPML import tests ----------------------------------------------
+
+    fn opml(body: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+            <opml version="2.0"><head><title>x</title></head><body>{body}</body></opml>"#
+        )
+    }
+
+    async fn group_urls(state: &AppState, group: &str) -> Vec<String> {
+        let conn = state.db.lock().await;
+        let mut stmt = conn
+            .prepare("SELECT url FROM feed_subscription WHERE group_name = ?1 ORDER BY position")
+            .unwrap();
+        stmt.query_map([group], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn import_opml_into_empty_db_creates_groups_and_feeds() {
+        let state = fresh_app_state();
+        let xml = opml(
+            r#"<outline text="Tech">
+                <outline xmlUrl="https://a.example/rss"/>
+                <outline xmlUrl="https://b.example/rss"/>
+              </outline>"#,
+        );
+        let s = import_opml(&state, &xml).await.unwrap();
+        assert_eq!(
+            s,
+            ImportSummary {
+                groups_created: 1,
+                feeds_added: 2,
+                skipped_invalid: 0,
+                skipped_duplicate: 0,
+            }
+        );
+        assert_eq!(
+            group_urls(&state, "Tech").await,
+            vec!["https://a.example/rss", "https://b.example/rss"]
+        );
+    }
+
+    #[tokio::test]
+    async fn import_opml_appends_to_existing_group_without_recounting_it() {
+        // Existing group must not increment `groups_created`; feeds that
+        // are already there must not increment `feeds_added`.
+        let state = fresh_app_state();
+        add_group(&state, "Tech").await.unwrap();
+        add_feed_to_group(&state, "Tech", "https://a.example/rss")
+            .await
+            .unwrap();
+
+        let xml = opml(
+            r#"<outline text="Tech">
+                <outline xmlUrl="https://a.example/rss"/>
+                <outline xmlUrl="https://b.example/rss"/>
+              </outline>"#,
+        );
+        let s = import_opml(&state, &xml).await.unwrap();
+        assert_eq!(s.groups_created, 0);
+        assert_eq!(s.feeds_added, 1);
+        assert_eq!(s.skipped_duplicate, 1);
+        assert_eq!(
+            group_urls(&state, "Tech").await,
+            vec!["https://a.example/rss", "https://b.example/rss"]
+        );
+    }
+
+    #[tokio::test]
+    async fn import_opml_is_idempotent_when_run_twice() {
+        // Re-importing the same file changes nothing — every URL
+        // collides on the second pass and lands in `skipped_duplicate`.
+        let state = fresh_app_state();
+        let xml = opml(
+            r#"<outline text="Tech">
+                 <outline xmlUrl="https://a.example/rss"/>
+               </outline>"#,
+        );
+        let first = import_opml(&state, &xml).await.unwrap();
+        let second = import_opml(&state, &xml).await.unwrap();
+        assert_eq!(first.feeds_added, 1);
+        assert_eq!(second.feeds_added, 0);
+        assert_eq!(second.skipped_duplicate, 1);
+        assert_eq!(second.groups_created, 0);
+        assert_eq!(group_urls(&state, "Tech").await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn import_opml_skips_javascript_and_file_schemes() {
+        // Reuses validate_feed_url, so the same scheme allow-list that
+        // protects the single-feed admin form protects OPML import.
+        let state = fresh_app_state();
+        let xml = opml(
+            r#"<outline text="Bad">
+                <outline xmlUrl="javascript:alert(1)"/>
+                <outline xmlUrl="file:///etc/passwd"/>
+                <outline xmlUrl="ftp://example.com/feed"/>
+                <outline xmlUrl="https://ok.example/rss"/>
+              </outline>"#,
+        );
+        let s = import_opml(&state, &xml).await.unwrap();
+        assert_eq!(s.feeds_added, 1);
+        assert_eq!(s.skipped_invalid, 3);
+        assert_eq!(s.skipped_duplicate, 0);
+        assert_eq!(
+            group_urls(&state, "Bad").await,
+            vec!["https://ok.example/rss"]
+        );
+    }
+
+    #[tokio::test]
+    async fn import_opml_top_level_feeds_land_in_uncategorized() {
+        let state = fresh_app_state();
+        let xml = opml(r#"<outline xmlUrl="https://loose.example/rss"/>"#);
+        let s = import_opml(&state, &xml).await.unwrap();
+        assert_eq!(s.groups_created, 1);
+        assert_eq!(s.feeds_added, 1);
+        let groups = list_groups(&state).await.unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, crate::opml::UNCATEGORIZED_GROUP);
+    }
+
+    #[tokio::test]
+    async fn import_opml_propagates_to_runtime_app_state() {
+        // Apply_from_db must run after the import — otherwise the
+        // imported feeds are persisted but invisible until restart.
+        let state = fresh_app_state();
+        let xml = opml(
+            r#"<outline text="Tech">
+                <outline xmlUrl="https://a.example/rss"/>
+              </outline>"#,
+        );
+        import_opml(&state, &xml).await.unwrap();
+        assert_eq!(
+            state.feeds.read().await.clone(),
+            vec!["https://a.example/rss"]
+        );
+        let groups = state.groups.read().await;
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "Tech");
+        assert_eq!(groups[0].feed_indices, vec![0_usize]);
+    }
+
+    #[tokio::test]
+    async fn import_opml_empty_body_yields_zero_summary() {
+        let state = fresh_app_state();
+        let s = import_opml(&state, &opml("")).await.unwrap();
+        assert_eq!(s, ImportSummary::default());
+        assert!(list_groups(&state).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn import_opml_malformed_xml_errors_and_leaves_db_clean() {
+        let state = fresh_app_state();
+        let bad = r#"<?xml version="1.0"?><opml><body><outline xmlUrl="x"></body></opml>"#;
+        assert!(import_opml(&state, bad).await.is_err());
+        assert!(list_groups(&state).await.unwrap().is_empty());
+        assert!(state.feeds.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn import_opml_dedups_duplicates_within_same_file() {
+        let state = fresh_app_state();
+        let xml = opml(
+            r#"<outline text="Tech">
+                <outline xmlUrl="https://x.example/rss"/>
+                <outline xmlUrl="https://x.example/rss"/>
+                <outline xmlUrl="https://x.example/rss"/>
+              </outline>"#,
+        );
+        let s = import_opml(&state, &xml).await.unwrap();
+        assert_eq!(s.feeds_added, 1);
+        assert_eq!(s.skipped_duplicate, 2);
+        assert_eq!(group_urls(&state, "Tech").await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn import_opml_appends_in_document_order() {
+        // The append order matters for the admin UI's list rendering;
+        // pin it so a future change to position bookkeeping shows up.
+        let state = fresh_app_state();
+        add_group(&state, "Tech").await.unwrap();
+        add_feed_to_group(&state, "Tech", "https://existing.example/rss")
+            .await
+            .unwrap();
+        let xml = opml(
+            r#"<outline text="Tech">
+                <outline xmlUrl="https://new1.example/rss"/>
+                <outline xmlUrl="https://new2.example/rss"/>
+              </outline>"#,
+        );
+        import_opml(&state, &xml).await.unwrap();
+        assert_eq!(
+            group_urls(&state, "Tech").await,
+            vec![
+                "https://existing.example/rss",
+                "https://new1.example/rss",
+                "https://new2.example/rss",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn import_opml_creates_only_new_groups() {
+        // Pre-create one of the two groups. Only the second should
+        // count toward `groups_created`.
+        let state = fresh_app_state();
+        add_group(&state, "Existing").await.unwrap();
+        let xml = opml(
+            r#"<outline text="Existing">
+                <outline xmlUrl="https://a.example/rss"/>
+              </outline>
+              <outline text="Brand New">
+                <outline xmlUrl="https://b.example/rss"/>
+              </outline>"#,
+        );
+        let s = import_opml(&state, &xml).await.unwrap();
+        assert_eq!(s.groups_created, 1, "only Brand New is new");
+        assert_eq!(s.feeds_added, 2);
+    }
+
+    #[tokio::test]
+    async fn import_opml_groups_inherited_from_nested_categories() {
+        // Re-verifies the parser's nearest-ancestor rule end-to-end
+        // against the DB: a feed under <Tech><Programming><feed/>>
+        // should be stored under "Programming", not "Tech".
+        let state = fresh_app_state();
+        let xml = opml(
+            r#"<outline text="Tech">
+                <outline text="Programming">
+                  <outline xmlUrl="https://prog.example/rss"/>
+                </outline>
+               </outline>"#,
+        );
+        import_opml(&state, &xml).await.unwrap();
+        assert_eq!(
+            group_urls(&state, "Programming").await,
+            vec!["https://prog.example/rss"]
+        );
+        // "Tech" exists as a label but has no feeds of its own.
+        assert!(group_urls(&state, "Tech").await.is_empty());
     }
 
     #[tokio::test]

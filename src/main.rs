@@ -26,6 +26,7 @@ mod feeds;
 mod gemini;
 mod jobs;
 mod logging;
+mod opml;
 mod routes;
 mod state;
 mod template;
