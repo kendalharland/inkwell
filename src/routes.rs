@@ -807,4 +807,247 @@ mod tests {
         assert!(effective_dark(&make_jar(), Some("1"), false));
         assert!(!effective_dark(&make_jar(), Some("0"), true));
     }
+
+    // ----- route-handler integration tests --------------------------------
+    //
+    // Driven through the real `Router` so we catch wiring bugs (wrong
+    // method, missing extractor, path-param name mismatch) on top of the
+    // handler logic itself.
+
+    use crate::admin::SCHEMA;
+    use crate::state::AppState;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use std::sync::Arc;
+    use tokio::sync::{Mutex as TokioMutex, RwLock as TokioRwLock};
+    use tower::ServiceExt;
+
+    fn fresh_app_state() -> Arc<AppState> {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        Arc::new(AppState {
+            feeds: TokioRwLock::new(Vec::new()),
+            feed_titles: TokioRwLock::new(Vec::new()),
+            groups: TokioRwLock::new(Vec::new()),
+            http: reqwest::Client::new(),
+            discovery_http: reqwest::Client::new(),
+            feed_cache: TokioRwLock::new(std::collections::HashMap::new()),
+            db: TokioMutex::new(conn),
+            feed_ttl: std::time::Duration::from_secs(60),
+            article_ttl_secs: 86400,
+            compact_default: false,
+            dark_default: false,
+            feed_search: crate::config::FeedSearchConfig::default(),
+        })
+    }
+
+    fn form(body: &str) -> Body {
+        Body::from(body.to_string())
+    }
+
+    fn post(path: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(form(body))
+            .unwrap()
+    }
+
+    fn get(path: &str) -> Request<Body> {
+        Request::builder()
+            .method("GET")
+            .uri(path)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    async fn body_string(resp: axum::response::Response) -> String {
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    fn iid16(s: &str) -> String {
+        crate::feeds::item_id(s)
+    }
+
+    #[tokio::test]
+    async fn post_bookmark_then_get_read_later_lists_the_entry() {
+        let state = fresh_app_state();
+        let iid = iid16("https://example.com/article");
+        let resp = router(state.clone())
+            .oneshot(post(
+                &format!("/bookmark/{}", iid),
+                "url=https%3A%2F%2Fexample.com%2Farticle&title=Hello&from=%2F",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+
+        let resp = router(state.clone())
+            .oneshot(get("/read-later"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains("Hello"));
+        assert!(html.contains("example.com"));
+        assert!(html.contains(&format!("/unbookmark/{}", iid)));
+    }
+
+    #[tokio::test]
+    async fn post_bookmark_rejects_non_hex_iid_with_400() {
+        let state = fresh_app_state();
+        let resp = router(state.clone())
+            .oneshot(post(
+                "/bookmark/not-a-hex-id",
+                "url=https%3A%2F%2Fx.com&title=t&from=%2F",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        // No row should have landed in the DB.
+        let conn = state.db.lock().await;
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM bookmark", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn post_bookmark_silently_drops_javascript_url() {
+        // Validates the scheme guard wired through `validate_feed_url`.
+        let state = fresh_app_state();
+        let iid = iid16("https://example.com/article");
+        let resp = router(state.clone())
+            .oneshot(post(
+                &format!("/bookmark/{}", iid),
+                "url=javascript%3Aalert(1)&title=Bad&from=%2F",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let conn = state.db.lock().await;
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM bookmark", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "javascript: URL must not persist");
+    }
+
+    #[tokio::test]
+    async fn post_bookmark_silently_drops_missing_title_or_url() {
+        let state = fresh_app_state();
+        let iid = iid16("https://example.com/article");
+        // Empty title.
+        let resp = router(state.clone())
+            .oneshot(post(
+                &format!("/bookmark/{}", iid),
+                "url=https%3A%2F%2Fx.com&title=&from=%2F",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        // Empty url.
+        let resp = router(state.clone())
+            .oneshot(post(
+                &format!("/bookmark/{}", iid),
+                "url=&title=Hello&from=%2F",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let conn = state.db.lock().await;
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM bookmark", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn post_unbookmark_removes_existing_row_and_silently_no_ops_otherwise() {
+        let state = fresh_app_state();
+        let iid = iid16("https://example.com/article");
+        // First add.
+        router(state.clone())
+            .oneshot(post(
+                &format!("/bookmark/{}", iid),
+                "url=https%3A%2F%2Fexample.com%2Farticle&title=Hello&from=%2F",
+            ))
+            .await
+            .unwrap();
+        // Then remove.
+        let resp = router(state.clone())
+            .oneshot(post(&format!("/unbookmark/{}", iid), "from=%2F"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        {
+            let conn = state.db.lock().await;
+            let n: i64 = conn
+                .query_row("SELECT COUNT(*) FROM bookmark", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 0);
+        }
+        // Removing again is a no-op (still 303, no error).
+        let resp = router(state.clone())
+            .oneshot(post(&format!("/unbookmark/{}", iid), "from=%2F"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    }
+
+    #[tokio::test]
+    async fn post_unbookmark_rejects_non_hex_iid_with_400() {
+        let state = fresh_app_state();
+        let resp = router(state.clone())
+            .oneshot(post("/unbookmark/totally-bogus", "from=%2F"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn read_later_empty_state_when_no_bookmarks() {
+        let state = fresh_app_state();
+        let resp = router(state.clone())
+            .oneshot(get("/read-later"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains("No bookmarks yet"));
+    }
+
+    #[tokio::test]
+    async fn admin_feed_search_empty_query_returns_empty_array() {
+        // Doesn't touch the network — empty/short-circuit path in
+        // feed_search::search_all.
+        let state = fresh_app_state();
+        let resp = router(state.clone())
+            .oneshot(get("/admin/feed-search?q="))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, "[]");
+    }
+
+    #[tokio::test]
+    async fn admin_add_group_and_list_through_http() {
+        // Whole-flow regression: form post → admin handler → DB ops →
+        // apply_from_db → next request sees the new group rendered.
+        let state = fresh_app_state();
+        let resp = router(state.clone())
+            .oneshot(post("/admin/group/add", "name=Tech"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let resp = router(state.clone())
+            .oneshot(get("/admin"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains(">Tech</h2>"), "expected group heading, got: {}", html);
+    }
 }

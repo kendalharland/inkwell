@@ -435,4 +435,160 @@ mod tests {
         assert_eq!(feed_count(&conn, "a"), 0);
         assert_eq!(feed_count(&conn, "b"), 1);
     }
+
+    // ----- async public-API tests -----------------------------------------
+    //
+    // Everything above exercises the schema-level fns directly against an
+    // in-memory `Connection`. These tests cover the async `add_*` /
+    // `remove_*` entry points the route handlers actually call, including
+    // their `apply_from_db` propagation into the live `AppState`.
+
+    use std::sync::Arc;
+    use tokio::sync::{Mutex, RwLock};
+
+    fn fresh_app_state() -> Arc<AppState> {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        Arc::new(AppState {
+            feeds: RwLock::new(Vec::new()),
+            feed_titles: RwLock::new(Vec::new()),
+            groups: RwLock::new(Vec::new()),
+            http: reqwest::Client::new(),
+            discovery_http: reqwest::Client::new(),
+            feed_cache: RwLock::new(std::collections::HashMap::new()),
+            db: Mutex::new(conn),
+            feed_ttl: std::time::Duration::from_secs(60),
+            article_ttl_secs: 86400,
+            compact_default: false,
+            dark_default: false,
+            feed_search: crate::config::FeedSearchConfig::default(),
+        })
+    }
+
+    #[tokio::test]
+    async fn add_group_then_add_feed_propagates_to_in_memory_state() {
+        let state = fresh_app_state();
+        add_group(&state, "tech").await.unwrap();
+        add_feed_to_group(&state, "tech", "https://lobste.rs/rss").await.unwrap();
+        assert_eq!(state.feeds.read().await.clone(), vec!["https://lobste.rs/rss"]);
+        let groups = state.groups.read().await;
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "tech");
+        assert_eq!(groups[0].feed_indices, vec![0_usize]);
+    }
+
+    #[tokio::test]
+    async fn add_feed_to_missing_group_errors_and_leaves_state_clean() {
+        let state = fresh_app_state();
+        let err = add_feed_to_group(&state, "missing", "https://x.example/rss")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("does not exist"));
+        assert!(state.feeds.read().await.is_empty());
+        let conn = state.db.lock().await;
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM feed_subscription", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn add_feed_rejects_non_http_schemes() {
+        // Same scheme allow-list the bookmark handler reuses.
+        let state = fresh_app_state();
+        add_group(&state, "tech").await.unwrap();
+        for bad in [
+            "javascript:alert(1)",
+            "data:text/html,<script>",
+            "file:///etc/passwd",
+            "ftp://example.com/feed",
+        ] {
+            let r = add_feed_to_group(&state, "tech", bad).await;
+            assert!(r.is_err(), "{:?} should be rejected", bad);
+        }
+        assert!(state.feeds.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn add_group_is_idempotent_per_name() {
+        let state = fresh_app_state();
+        add_group(&state, "tech").await.unwrap();
+        let err = add_group(&state, "tech").await.unwrap_err().to_string();
+        assert!(err.contains("already exists"));
+        assert_eq!(state.groups.read().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn add_group_rejects_empty_or_whitespace_names() {
+        let state = fresh_app_state();
+        assert!(add_group(&state, "").await.is_err());
+        assert!(add_group(&state, "   ").await.is_err());
+        assert!(state.groups.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_feed_from_group_drops_only_that_subscription() {
+        let state = fresh_app_state();
+        add_group(&state, "tech").await.unwrap();
+        add_feed_to_group(&state, "tech", "https://a/rss").await.unwrap();
+        add_feed_to_group(&state, "tech", "https://b/rss").await.unwrap();
+        remove_feed_from_group(&state, "tech", "https://a/rss").await.unwrap();
+        let groups = state.groups.read().await;
+        let feeds = state.feeds.read().await;
+        let urls: Vec<String> = groups[0]
+            .feed_indices
+            .iter()
+            .map(|&i| feeds[i].clone())
+            .collect();
+        assert_eq!(urls, vec!["https://b/rss"]);
+    }
+
+    #[tokio::test]
+    async fn remove_feed_is_silent_when_not_subscribed() {
+        let state = fresh_app_state();
+        add_group(&state, "tech").await.unwrap();
+        // No error even though the URL was never added.
+        remove_feed_from_group(&state, "tech", "https://nope/rss")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn remove_group_cascades_through_public_api() {
+        // Whole-flow regression: the public async path goes through
+        // apply_from_db, which must reflect the cascade in the live
+        // in-memory state, not just the DB.
+        let state = fresh_app_state();
+        add_group(&state, "tech").await.unwrap();
+        add_feed_to_group(&state, "tech", "https://a/rss").await.unwrap();
+        add_feed_to_group(&state, "tech", "https://b/rss").await.unwrap();
+        remove_group(&state, "tech").await.unwrap();
+        assert!(state.groups.read().await.is_empty());
+        assert!(state.feeds.read().await.is_empty());
+        let conn = state.db.lock().await;
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM feed_subscription", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "FK cascade should have dropped the rows");
+    }
+
+    #[tokio::test]
+    async fn remove_group_errors_when_not_found() {
+        let state = fresh_app_state();
+        let err = remove_group(&state, "missing").await.unwrap_err().to_string();
+        assert!(err.contains("does not exist"));
+    }
+
+    #[tokio::test]
+    async fn list_groups_reflects_admin_mutations_in_order() {
+        let state = fresh_app_state();
+        add_group(&state, "first").await.unwrap();
+        add_group(&state, "second").await.unwrap();
+        add_feed_to_group(&state, "first", "https://x/rss").await.unwrap();
+        let groups = list_groups(&state).await.unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].name, "first");
+        assert_eq!(groups[0].feeds, vec!["https://x/rss"]);
+        assert_eq!(groups[1].name, "second");
+        assert!(groups[1].feeds.is_empty());
+    }
 }

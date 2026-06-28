@@ -225,3 +225,112 @@ pub fn reconcile_schedules(
         .with_context(|| format!("registering purge schedule '{}'", purge_cron))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use tokio::sync::RwLock;
+
+    fn fresh_state(article_ttl_days: i64) -> Arc<AppState> {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::admin::SCHEMA).unwrap();
+        Arc::new(AppState {
+            feeds: RwLock::new(Vec::new()),
+            feed_titles: RwLock::new(Vec::new()),
+            groups: RwLock::new(Vec::new()),
+            http: reqwest::Client::new(),
+            discovery_http: reqwest::Client::new(),
+            feed_cache: RwLock::new(HashMap::new()),
+            db: Mutex::new(conn),
+            feed_ttl: Duration::from_secs(60),
+            article_ttl_secs: article_ttl_days * 86400,
+            compact_default: false,
+            dark_default: false,
+            feed_search: crate::config::FeedSearchConfig::default(),
+        })
+    }
+
+    async fn seed_article(state: &AppState, id: &str, fetched_at: i64) {
+        let conn = state.db.lock().await;
+        conn.execute(
+            "INSERT INTO article (id, url, title, html, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![id, "https://example.com/x", "T", "<p>body</p>", fetched_at],
+        )
+        .unwrap();
+    }
+
+    async fn bookmark(state: &AppState, id: &str) {
+        let conn = state.db.lock().await;
+        crate::bookmarks::add(&conn, id, "https://example.com/x", "T", 0).unwrap();
+    }
+
+    async fn article_ids(state: &AppState) -> Vec<String> {
+        let conn = state.db.lock().await;
+        let mut stmt = conn.prepare("SELECT id FROM article ORDER BY id").unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn run_purge_deletes_only_articles_older_than_ttl() {
+        let state = fresh_state(30);
+        let fresh = now_secs() - 1; // well within TTL
+        let stale = now_secs() - 365 * 86400; // a year old
+        seed_article(&state, "fresh", fresh).await;
+        seed_article(&state, "stale", stale).await;
+        let removed = run_purge(state.clone()).await.unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(article_ids(&state).await, vec!["fresh"]);
+    }
+
+    #[tokio::test]
+    async fn run_purge_pins_bookmarked_articles_past_ttl() {
+        // The user-visible promise of the read-later flow: a saved
+        // article doesn't silently vanish even if the feed has rolled
+        // it off and the purge job has run since.
+        let state = fresh_state(30);
+        let stale = now_secs() - 365 * 86400;
+        seed_article(&state, "saved", stale).await;
+        seed_article(&state, "unsaved", stale).await;
+        bookmark(&state, "saved").await;
+        let removed = run_purge(state.clone()).await.unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(article_ids(&state).await, vec!["saved"]);
+    }
+
+    #[tokio::test]
+    async fn run_purge_no_op_when_nothing_old_enough() {
+        let state = fresh_state(30);
+        let fresh = now_secs() - 1;
+        seed_article(&state, "a", fresh).await;
+        seed_article(&state, "b", fresh).await;
+        let removed = run_purge(state.clone()).await.unwrap();
+        assert_eq!(removed, 0);
+        assert_eq!(article_ids(&state).await, vec!["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn run_purge_drops_unbookmarked_article_after_unbookmark() {
+        // Bookmarks pin past the TTL only while the bookmark exists;
+        // removing the bookmark restores the row's eligibility for
+        // deletion on the next purge tick. This is the inverse of the
+        // pinning guarantee — both are load-bearing.
+        let state = fresh_state(30);
+        let stale = now_secs() - 365 * 86400;
+        seed_article(&state, "saved-then-not", stale).await;
+        bookmark(&state, "saved-then-not").await;
+        // First purge: bookmark protects.
+        assert_eq!(run_purge(state.clone()).await.unwrap(), 0);
+        // Remove the bookmark.
+        {
+            let conn = state.db.lock().await;
+            crate::bookmarks::remove(&conn, "saved-then-not").unwrap();
+        }
+        // Second purge: now the article is eligible and goes.
+        assert_eq!(run_purge(state.clone()).await.unwrap(), 1);
+        assert!(article_ids(&state).await.is_empty());
+    }
+}

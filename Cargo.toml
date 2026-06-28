@@ -39,7 +39,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 
 [dev-dependencies]
+http-body-util = "0.1"
 mediatype = "0.19"
+tower = { version = "0.5", features = ["util"] }
 
 [profile.release]
 lto = "thin"

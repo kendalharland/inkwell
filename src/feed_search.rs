@@ -353,6 +353,30 @@ mod tests {
         assert!(rs.is_empty());
     }
 
+    #[test]
+    fn autodiscovery_skips_links_with_no_type_attribute() {
+        // Some sites omit `type` on what is in practice an RSS feed.
+        // Document the current behavior (skip) — if we ever flip to
+        // accepting these, this test's assertion moves with the rule.
+        let html = r##"<html><head>
+            <link rel="alternate" href="/feed.xml" title="Site feed">
+            </head></html>"##;
+        let rs = parse_links(html);
+        assert!(rs.is_empty(), "links without type should currently be skipped");
+    }
+
+    #[test]
+    fn autodiscovery_skips_links_with_wrong_rel_value() {
+        // `rel="stylesheet"` etc. should never make it through — the
+        // selector is `link[rel="alternate"]` and we depend on that.
+        let html = r##"<html><head>
+            <link rel="stylesheet" type="application/rss+xml" href="/styles.xml">
+            <link rel="icon" type="application/rss+xml" href="/icon.xml">
+            </head></html>"##;
+        let rs = parse_links(html);
+        assert!(rs.is_empty());
+    }
+
     // ----- SSRF guards (#15) ------------------------------------------------
 
     fn v4(s: &str) -> Ipv4Addr {

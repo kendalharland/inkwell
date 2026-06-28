@@ -393,4 +393,22 @@ mod tests {
         let entries = collect_entries(&feeds, &cache, &[0]);
         assert_eq!(entries[0].feed_title, "F1");
     }
+
+    #[test]
+    fn collect_entries_carries_url_through_to_view() {
+        // The bookmark form posts the article URL from EntryView; a
+        // regression that lost it (e.g. an accidental swap with `iid`)
+        // would silently break the read-later flow's "where did it
+        // come from" link. Pin the round-trip.
+        let feeds = vec!["https://example.com/feed".to_string()];
+        let parsed = rss_with(&[
+            ("a", "https://example.com/articles/42", "Mon, 01 Jan 2025 00:00:00 GMT"),
+        ]);
+        let mut cache = HashMap::new();
+        cache.insert(0, CachedFeed { parsed, fetched_at: std::time::SystemTime::now() });
+        let entries = collect_entries(&feeds, &cache, &[0]);
+        assert_eq!(entries[0].url, "https://example.com/articles/42");
+        // And the iid is derived from that URL, so they're linked.
+        assert_eq!(entries[0].iid, item_id("https://example.com/articles/42"));
+    }
 }
