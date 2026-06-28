@@ -162,21 +162,29 @@ ul.list li.entry .entry-body { flex: 1; min-width: 0; }
   border: none;
   padding: .2em .35em;
   margin: 0;
-  font-size: 22px;
-  line-height: 1;
+  line-height: 0;
   cursor: pointer;
   color: var(--muted);
   min-width: 32px;
   min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .bookmark-btn:hover { color: var(--fg); }
 .bookmark-btn:focus { outline: 1px dotted var(--border); outline-offset: 2px; }
+/* SVG bookmark glyph. Size lives here, not on the button's font-size,
+   so the icon is independent of the surrounding text scaling and stays
+   crisp on e-ink. */
+.bm-icon { width: 18px; height: 22px; display: block; }
+.bookmark-btn-lg .bm-icon { width: 22px; height: 28px; }
+body.compact .bm-icon { width: 15px; height: 19px; }
+body.compact .bookmark-btn-lg .bm-icon { width: 19px; height: 24px; }
 
 .item-header { display: flex; align-items: flex-start; gap: .5em; }
 .item-header h1 { flex: 1; }
-.bookmark-btn-lg { font-size: 30px; padding: .1em .3em; }
-body.compact .bookmark-btn { font-size: 19px; min-width: 28px; min-height: 28px; }
-body.compact .bookmark-btn-lg { font-size: 26px; }
+.bookmark-btn-lg { padding: .1em .3em; }
+body.compact .bookmark-btn { min-width: 28px; min-height: 28px; }
 
 /* Compact density — toggled by ?compact=1 or view.compact_default. */
 body.compact { font-size: 16px; line-height: 1.4; max-width: 36em; }

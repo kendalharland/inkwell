@@ -156,6 +156,20 @@ fn back_url(headers: &HeaderMap, from: Option<&str>) -> String {
         .unwrap_or_else(|| "/".into())
 }
 
+/// Same as [`back_url`] but with `#item-{iid}` appended so the browser
+/// scrolls back to the row the user just toggled instead of the top of
+/// the page. Drops any pre-existing fragment on the back URL — only
+/// one anchor wins, and the row anchor is the one that matters here.
+fn back_url_with_item_anchor(headers: &HeaderMap, from: Option<&str>, iid: &str) -> String {
+    let mut url = back_url(headers, from);
+    if let Some(hash) = url.find('#') {
+        url.truncate(hash);
+    }
+    url.push_str("#item-");
+    url.push_str(iid);
+    url
+}
+
 fn sticky_cookie(name: &str, value: &str) -> Cookie<'static> {
     Cookie::build((name.to_string(), value.to_string()))
         .path("/")
@@ -457,17 +471,17 @@ fn render_item_bookmark_button(
     // Attribute values are single-quoted; use the attribute-specific
     // encoder so an apostrophe in the title/url/from can't close the
     // attribute (#17).
-    let (action, glyph, label) = if bookmarked {
-        ("/unbookmark", "★", "Remove bookmark")
+    let (action, label) = if bookmarked {
+        ("/unbookmark", "Remove bookmark")
     } else {
-        ("/bookmark", "☆", "Save for later")
+        ("/bookmark", "Save for later")
     };
     format!(
         "<form method='post' action='{action}/{iid}' class='bookmark-form bookmark-form-lg'>\
          <input type='hidden' name='url' value='{url}'>\
          <input type='hidden' name='title' value='{title}'>\
          <input type='hidden' name='from' value='{from}'>\
-         <button type='submit' class='bookmark-btn bookmark-btn-lg' aria-label='{label}'>{glyph}</button>\
+         <button type='submit' class='bookmark-btn bookmark-btn-lg' aria-label='{label}'>{icon}</button>\
          </form>",
         action = action,
         iid = iid,
@@ -475,7 +489,7 @@ fn render_item_bookmark_button(
         title = encode_single_quoted_attribute(title),
         from = encode_single_quoted_attribute(from),
         label = label,
-        glyph = glyph,
+        icon = crate::view::bookmark_icon(bookmarked),
     )
 }
 
@@ -507,7 +521,11 @@ async fn add_bookmark(
         Ok(u) => u,
         Err(e) => {
             tracing::warn!("bookmark add rejected for {}: {e}", iid);
-            return Ok(Redirect::to(&back_url(&headers, f.from.as_deref())));
+            return Ok(Redirect::to(&back_url_with_item_anchor(
+                &headers,
+                f.from.as_deref(),
+                &iid,
+            )));
         }
     };
     if !title.is_empty() {
@@ -516,7 +534,11 @@ async fn add_bookmark(
             tracing::error!("bookmark add failed for {}: {e:#}", iid);
         }
     }
-    Ok(Redirect::to(&back_url(&headers, f.from.as_deref())))
+    Ok(Redirect::to(&back_url_with_item_anchor(
+        &headers,
+        f.from.as_deref(),
+        &iid,
+    )))
 }
 
 async fn remove_bookmark(
@@ -534,7 +556,11 @@ async fn remove_bookmark(
             tracing::error!("bookmark remove failed for {}: {e:#}", iid);
         }
     }
-    Ok(Redirect::to(&back_url(&headers, f.from.as_deref())))
+    Ok(Redirect::to(&back_url_with_item_anchor(
+        &headers,
+        f.from.as_deref(),
+        &iid,
+    )))
 }
 
 async fn read_later(
@@ -549,11 +575,12 @@ async fn read_later(
     };
     if items_data.is_empty() {
         let body = "<h1>Read later</h1><div class='empty'>No bookmarks yet. \
-                    Tap the ☆ next to a story to save it for later.</div>";
+                    Tap the bookmark icon next to a story to save it for later.</div>";
         return Html(page("Read later", body, &bc));
     }
     let mut items = String::from("<h1>Read later</h1><ul class='list'>");
     let from_enc = url_encode("/read-later");
+    let icon = crate::view::bookmark_icon(true);
     for b in &items_data {
         let host = Url::parse(&b.url)
             .ok()
@@ -561,10 +588,10 @@ async fn read_later(
             .unwrap_or_default();
         write!(
             items,
-            "<li class='entry'>\
+            "<li class='entry' id='item-{iid}'>\
              <form method='post' action='/unbookmark/{iid}' class='bookmark-form'>\
              <input type='hidden' name='from' value='{from_path}'>\
-             <button type='submit' class='bookmark-btn' aria-label='Remove bookmark'>★</button>\
+             <button type='submit' class='bookmark-btn' aria-label='Remove bookmark'>{icon}</button>\
              </form>\
              <div class='entry-body'>\
              <a href='/item/{iid}?from={from}'>{title}</a>\
@@ -575,6 +602,7 @@ async fn read_later(
             from_path = encode_text("/read-later"),
             title = encode_text(&b.title),
             host = encode_text(&host),
+            icon = icon,
         )
         .unwrap();
     }
@@ -952,6 +980,78 @@ mod tests {
 
     fn iid16(s: &str) -> String {
         crate::feeds::item_id(s)
+    }
+
+    #[tokio::test]
+    async fn post_bookmark_redirect_lands_at_item_anchor() {
+        // Scroll preservation depends on the bookmark/unbookmark
+        // handlers appending `#item-{iid}` to the back URL — without
+        // it, the browser scrolls to the top of the listing on every
+        // toggle. The matching id='item-{iid}' lives on each <li>
+        // in render_entries.
+        let state = fresh_app_state();
+        let iid = iid16("https://example.com/article");
+        let resp = router(state.clone())
+            .oneshot(post(
+                &format!("/bookmark/{}", iid),
+                "url=https%3A%2F%2Fexample.com%2Farticle&title=Hello&from=%2F%3Fpage%3D2",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let loc = resp
+            .headers()
+            .get("location")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(loc, format!("/?page=2#item-{}", iid));
+    }
+
+    #[tokio::test]
+    async fn post_unbookmark_redirect_lands_at_item_anchor() {
+        let state = fresh_app_state();
+        let iid = iid16("https://example.com/article");
+        let resp = router(state.clone())
+            .oneshot(post(&format!("/unbookmark/{}", iid), "from=%2Fread-later"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let loc = resp
+            .headers()
+            .get("location")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(loc, format!("/read-later#item-{}", iid));
+    }
+
+    #[tokio::test]
+    async fn post_bookmark_anchor_drops_preexisting_fragment_on_from() {
+        // If a client somehow posts a `from` with its own fragment,
+        // we must not produce a URL with two `#`. Last anchor wins;
+        // the row anchor is the only one that matters for UX here.
+        let state = fresh_app_state();
+        let iid = iid16("https://example.com/article");
+        let resp = router(state.clone())
+            .oneshot(post(
+                &format!("/bookmark/{}", iid),
+                // from=/?page=1#item-other (url-encoded)
+                "url=https%3A%2F%2Fexample.com%2Farticle&title=Hello&from=%2F%3Fpage%3D1%23item-other",
+            ))
+            .await
+            .unwrap();
+        let loc = resp
+            .headers()
+            .get("location")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(loc.matches('#').count(), 1);
+        assert!(loc.ends_with(&format!("#item-{}", iid)));
     }
 
     #[tokio::test]

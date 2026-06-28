@@ -29,6 +29,26 @@ pub fn url_encode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 
+/// Inline SVG of a folded-ribbon bookmark, filled when saved and
+/// outlined when not. Used by every bookmark button in the app so the
+/// shape stays consistent. Sized via the `.bm-icon` CSS rule rather
+/// than the button's font-size, which is why the call sites don't pass
+/// any sizing info — the listing and the item-header buttons just set
+/// different padding on the surrounding button.
+pub fn bookmark_icon(filled: bool) -> &'static str {
+    if filled {
+        "<svg class='bm-icon' viewBox='0 0 16 20' aria-hidden='true' \
+         xmlns='http://www.w3.org/2000/svg'>\
+         <path d='M3 1.5h10a.5.5 0 0 1 .5.5v16.18l-5.5-3.93-5.5 3.93V2a.5.5 0 0 1 .5-.5z' \
+         fill='currentColor'/></svg>"
+    } else {
+        "<svg class='bm-icon' viewBox='0 0 16 20' aria-hidden='true' \
+         xmlns='http://www.w3.org/2000/svg'>\
+         <path d='M3 1.5h10a.5.5 0 0 1 .5.5v16.18l-5.5-3.93-5.5 3.93V2a.5.5 0 0 1 .5-.5z' \
+         fill='none' stroke='currentColor' stroke-width='1.6'/></svg>"
+    }
+}
+
 /// Small bookmark form rendered alongside each listing entry. Two
 /// hidden inputs carry the url and title so the bookmark row can stand
 /// on its own after the feed has rolled the entry off. `from` rides
@@ -40,17 +60,17 @@ pub fn url_encode(s: &str) -> String {
 /// leaves `'` unescaped and a feed title containing one (e.g.
 /// "What's new") would close the attribute and corrupt the row (#17).
 pub fn render_bookmark_button(e: &EntryView, from_path: &str, bookmarked: bool) -> String {
-    let (action, glyph, label) = if bookmarked {
-        ("/unbookmark", "★", "Remove bookmark")
+    let (action, label) = if bookmarked {
+        ("/unbookmark", "Remove bookmark")
     } else {
-        ("/bookmark", "☆", "Save for later")
+        ("/bookmark", "Save for later")
     };
     format!(
         "<form method='post' action='{action}/{iid}' class='bookmark-form'>\
          <input type='hidden' name='url' value='{url}'>\
          <input type='hidden' name='title' value='{title}'>\
          <input type='hidden' name='from' value='{from}'>\
-         <button type='submit' class='bookmark-btn' aria-label='{label}'>{glyph}</button>\
+         <button type='submit' class='bookmark-btn' aria-label='{label}'>{icon}</button>\
          </form>",
         action = action,
         iid = e.iid,
@@ -58,7 +78,7 @@ pub fn render_bookmark_button(e: &EntryView, from_path: &str, bookmarked: bool) 
         title = encode_single_quoted_attribute(&e.title),
         from = encode_single_quoted_attribute(from_path),
         label = label,
-        glyph = glyph,
+        icon = bookmark_icon(bookmarked),
     )
 }
 
@@ -128,9 +148,12 @@ pub fn render_entries(
         };
         let bookmarked = bookmarks.contains(&e.iid);
         let bm = render_bookmark_button(e, &from, bookmarked);
+        // id='item-{iid}' is the scroll-restoration target — bookmark
+        // handlers redirect with that anchor so the user lands at the
+        // row they just toggled instead of the top of the page.
         write!(
             items,
-            "<li class='entry'>{bm}\
+            "<li class='entry' id='item-{iid}'>{bm}\
              <div class='entry-body'>\
              <a href='/item/{iid}?from={from}'>{title}</a>\
              <div class='meta'>{host}{source}</div>\
@@ -284,23 +307,50 @@ mod tests {
     }
 
     #[test]
-    fn render_entries_marks_bookmarked_with_filled_star() {
+    fn render_entries_marks_bookmarked_with_filled_icon() {
         let entries = vec![ev("aaaa", "hello", 1)];
         let mut bm = HashSet::new();
         bm.insert("aaaa".to_string());
         let out = render_entries("X", &entries, &bm, 1, "/", false);
-        assert!(out.contains("★"), "expected filled star, got: {}", out);
+        // Filled icon variant: fill='currentColor'. The outlined variant
+        // uses fill='none', so we also assert that's absent — a regression
+        // that flipped the two states would otherwise pass.
+        assert!(
+            out.contains("fill='currentColor'"),
+            "expected filled bookmark icon, got: {}",
+            out
+        );
+        assert!(!out.contains("fill='none'"));
         assert!(out.contains("action='/unbookmark/aaaa'"));
         assert!(!out.contains("action='/bookmark/aaaa'"));
     }
 
     #[test]
-    fn render_entries_marks_unbookmarked_with_outline_star() {
+    fn render_entries_marks_unbookmarked_with_outlined_icon() {
         let entries = vec![ev("aaaa", "hello", 1)];
         let out = render_entries("X", &entries, &no_bookmarks(), 1, "/", false);
-        assert!(out.contains("☆"), "expected outline star, got: {}", out);
+        assert!(
+            out.contains("fill='none'"),
+            "expected outlined bookmark icon, got: {}",
+            out
+        );
+        assert!(out.contains("stroke='currentColor'"));
         assert!(out.contains("action='/bookmark/aaaa'"));
         assert!(!out.contains("action='/unbookmark/aaaa'"));
+    }
+
+    #[test]
+    fn render_entries_tags_rows_with_anchor_id() {
+        // The bookmark handlers redirect to `from#item-{iid}` so the
+        // browser scrolls back to the row the user toggled. That hinges
+        // on every <li> carrying the matching id.
+        let entries = vec![ev("aaaa1234bbbb5678", "hello", 1)];
+        let out = render_entries("X", &entries, &no_bookmarks(), 1, "/", false);
+        assert!(
+            out.contains("id='item-aaaa1234bbbb5678'"),
+            "expected anchor id on row, got: {}",
+            out
+        );
     }
 
     #[test]
