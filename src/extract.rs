@@ -83,13 +83,11 @@ static IMG_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?is)<img\b([^>]*?)/?>"#).unwrap()
 });
 
-static SRC_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?is)\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')"#).unwrap()
-});
+static SRC_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?is)\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')"#).unwrap());
 
-static ALT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?is)\balt\s*=\s*(?:"([^"]*)"|'([^']*)')"#).unwrap()
-});
+static ALT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?is)\balt\s*=\s*(?:"([^"]*)"|'([^']*)')"#).unwrap());
 
 fn extract_attr(attrs: &str, re: &Regex) -> Option<String> {
     let c = re.captures(attrs)?;
@@ -126,7 +124,9 @@ pub fn sanitize_images(html: &str) -> String {
                     encode_quoted_attribute(&alt_str)
                 )
             } else {
-                let label = alt.filter(|a| !a.is_empty()).unwrap_or_else(|| "image".into());
+                let label = alt
+                    .filter(|a| !a.is_empty())
+                    .unwrap_or_else(|| "image".into());
                 format!(
                     r#"<div class="img-fallback">[{}]</div>"#,
                     encode_text(&label)
@@ -177,8 +177,14 @@ mod tests {
 
     #[test]
     fn sanitize_classifies_query_string_url_by_path_extension() {
-        let out = sanitize_images(r#"<img src="https://cdn.example.com/photo.jpg?w=600&fit=crop" alt="x">"#);
-        assert!(out.starts_with("<img"), "expected <img> for jpg with query string, got: {}", out);
+        let out = sanitize_images(
+            r#"<img src="https://cdn.example.com/photo.jpg?w=600&fit=crop" alt="x">"#,
+        );
+        assert!(
+            out.starts_with("<img"),
+            "expected <img> for jpg with query string, got: {}",
+            out
+        );
     }
 
     #[test]

@@ -91,7 +91,10 @@ async fn link_autodiscovery(http: &reqwest::Client, query: &str) -> Result<Vec<S
             .and_then(|b| b.join(href).ok())
             .map(|u| u.to_string())
             .unwrap_or_else(|| href.to_string());
-        let title = attrs.attr("title").map(|s| s.to_string()).unwrap_or_else(|| abs.clone());
+        let title = attrs
+            .attr("title")
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| abs.clone());
         out.push(SearchResult {
             url: abs,
             title,
@@ -321,9 +324,19 @@ mod tests {
             if !is_feed_mime(a.attr("type").unwrap_or("")) {
                 continue;
             }
-            let abs = base.join(href).map(|u| u.to_string()).unwrap_or_else(|_| href.to_string());
-            let title = a.attr("title").map(|s| s.to_string()).unwrap_or_else(|| abs.clone());
-            out.push(SearchResult { url: abs, title, source: "autodiscovery" });
+            let abs = base
+                .join(href)
+                .map(|u| u.to_string())
+                .unwrap_or_else(|_| href.to_string());
+            let title = a
+                .attr("title")
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| abs.clone());
+            out.push(SearchResult {
+                url: abs,
+                title,
+                source: "autodiscovery",
+            });
         }
         out
     }
@@ -362,7 +375,10 @@ mod tests {
             <link rel="alternate" href="/feed.xml" title="Site feed">
             </head></html>"##;
         let rs = parse_links(html);
-        assert!(rs.is_empty(), "links without type should currently be skipped");
+        assert!(
+            rs.is_empty(),
+            "links without type should currently be skipped"
+        );
     }
 
     #[test]
@@ -404,7 +420,7 @@ mod tests {
             "0.0.0.0",
             "255.255.255.255",
             "224.0.0.1",
-            "192.0.2.1",  // TEST-NET-1
+            "192.0.2.1",   // TEST-NET-1
             "203.0.113.1", // TEST-NET-3
         ] {
             assert!(is_disallowed_ipv4(v4(s)), "{} should be blocked", s);
@@ -413,7 +429,13 @@ mod tests {
 
     #[test]
     fn ipv4_filter_allows_public_addresses() {
-        for s in ["1.1.1.1", "8.8.8.8", "151.101.0.81", "100.63.255.255", "100.128.0.0"] {
+        for s in [
+            "1.1.1.1",
+            "8.8.8.8",
+            "151.101.0.81",
+            "100.63.255.255",
+            "100.128.0.0",
+        ] {
             assert!(!is_disallowed_ipv4(v4(s)), "{} should be allowed", s);
         }
     }
@@ -421,15 +443,15 @@ mod tests {
     #[test]
     fn ipv6_filter_blocks_loopback_link_local_and_ula() {
         for s in [
-            "::1",                                       // loopback
-            "::",                                        // unspecified
-            "fe80::1",                                   // link-local
-            "fc00::1",                                   // ULA
-            "fd12:3456:789a::1",                         // ULA
-            "ff00::1",                                   // multicast
-            "::ffff:127.0.0.1",                          // v4-mapped loopback
-            "::ffff:10.0.0.5",                           // v4-mapped private
-            "::ffff:169.254.169.254",                    // v4-mapped IMDS
+            "::1",                    // loopback
+            "::",                     // unspecified
+            "fe80::1",                // link-local
+            "fc00::1",                // ULA
+            "fd12:3456:789a::1",      // ULA
+            "ff00::1",                // multicast
+            "::ffff:127.0.0.1",       // v4-mapped loopback
+            "::ffff:10.0.0.5",        // v4-mapped private
+            "::ffff:169.254.169.254", // v4-mapped IMDS
         ] {
             assert!(is_disallowed_ipv6(v6(s)), "{} should be blocked", s);
         }

@@ -262,7 +262,14 @@ async fn one_feed(
         let conn = state.db.lock().await;
         bookmarks::load_ids(&conn)
     };
-    let body = render_entries(&title, &entries, &bms, q.page, &format!("/feed/{}", idx), false);
+    let body = render_entries(
+        &title,
+        &entries,
+        &bms,
+        q.page,
+        &format!("/feed/{}", idx),
+        false,
+    );
     Ok(Html(page(&title, &body, &bc)))
 }
 
@@ -312,7 +319,14 @@ async fn one_group(
         let conn = state.db.lock().await;
         bookmarks::load_ids(&conn)
     };
-    let body = render_entries(&name, &entries, &bms, q.page, &format!("/group/{}", idx), true);
+    let body = render_entries(
+        &name,
+        &entries,
+        &bms,
+        q.page,
+        &format!("/group/{}", idx),
+        true,
+    );
     Ok(Html(page(&name, &body, &bc)))
 }
 
@@ -372,11 +386,7 @@ async fn one_item(
             'outer: for &i in &all_idxs {
                 let Some(cf) = cache.get(&i) else { continue };
                 for e in &cf.parsed.entries {
-                    let l = e
-                        .links
-                        .first()
-                        .map(|l| l.href.clone())
-                        .unwrap_or_default();
+                    let l = e.links.first().map(|l| l.href.clone()).unwrap_or_default();
                     if l.is_empty() {
                         continue;
                     }
@@ -681,10 +691,7 @@ fn redirect_with_flash(ok: Option<&str>, err: Option<&str>) -> Redirect {
     Redirect::to(&url)
 }
 
-async fn admin_add_feed(
-    State(state): State<Arc<AppState>>,
-    Form(f): Form<FeedForm>,
-) -> Redirect {
+async fn admin_add_feed(State(state): State<Arc<AppState>>, Form(f): Form<FeedForm>) -> Redirect {
     let group = f.group.clone();
     let url = f.url.clone();
     match admin::add_feed_to_group(&state, &group, &url).await {
@@ -705,10 +712,7 @@ async fn admin_remove_feed(
     }
 }
 
-async fn admin_add_group(
-    State(state): State<Arc<AppState>>,
-    Form(f): Form<GroupForm>,
-) -> Redirect {
+async fn admin_add_group(State(state): State<Arc<AppState>>, Form(f): Form<GroupForm>) -> Redirect {
     let name = f.name.clone();
     match admin::add_group(&state, &name).await {
         Ok(()) => redirect_with_flash(Some(&format!("Created group {}.", name)), None),
@@ -772,7 +776,11 @@ mod tests {
 
     #[test]
     fn effective_compact_query_overrides_cookie() {
-        assert!(!effective_compact(&jar_with("compact", "1"), Some(0), false));
+        assert!(!effective_compact(
+            &jar_with("compact", "1"),
+            Some(0),
+            false
+        ));
         assert!(effective_compact(&jar_with("compact", "0"), Some(1), false));
     }
 
@@ -798,8 +806,16 @@ mod tests {
     #[test]
     fn effective_dark_query_overrides_cookie() {
         // The cookie says dark but a `?theme=light` query forces light here.
-        assert!(!effective_dark(&jar_with("theme", "dark"), Some("light"), false));
-        assert!(effective_dark(&jar_with("theme", "light"), Some("dark"), false));
+        assert!(!effective_dark(
+            &jar_with("theme", "dark"),
+            Some("light"),
+            false
+        ));
+        assert!(effective_dark(
+            &jar_with("theme", "light"),
+            Some("dark"),
+            false
+        ));
     }
 
     #[test]
@@ -1042,12 +1058,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
-        let resp = router(state.clone())
-            .oneshot(get("/admin"))
-            .await
-            .unwrap();
+        let resp = router(state.clone()).oneshot(get("/admin")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let html = body_string(resp).await;
-        assert!(html.contains(">Tech</h2>"), "expected group heading, got: {}", html);
+        assert!(
+            html.contains(">Tech</h2>"),
+            "expected group heading, got: {}",
+            html
+        );
     }
 }

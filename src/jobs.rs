@@ -63,11 +63,7 @@ pub async fn run_refresh(state: Arc<AppState>) -> Result<(usize, usize)> {
         for &i in &all_idxs {
             let Some(cf) = cache.get(&i) else { continue };
             for e in &cf.parsed.entries {
-                let link = e
-                    .links
-                    .first()
-                    .map(|l| l.href.clone())
-                    .unwrap_or_default();
+                let link = e.links.first().map(|l| l.href.clone()).unwrap_or_default();
                 if link.is_empty() {
                     continue;
                 }

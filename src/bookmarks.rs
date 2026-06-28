@@ -129,7 +129,11 @@ mod tests {
         add(&c, "a", "https://a", "A", 100).unwrap();
         add(&c, "b", "https://b", "B", 300).unwrap();
         add(&c, "c", "https://c", "C", 200).unwrap();
-        let ids: Vec<_> = list(&c).unwrap().into_iter().map(|b| b.article_id).collect();
+        let ids: Vec<_> = list(&c)
+            .unwrap()
+            .into_iter()
+            .map(|b| b.article_id)
+            .collect();
         assert_eq!(ids, vec!["b", "c", "a"]);
     }
 }

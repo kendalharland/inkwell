@@ -65,12 +65,15 @@ impl Config {
         Ok(Config {
             port: parse_env("PAIR_PORT", "3000")?,
             bind: env_or("PAIR_BIND", "0.0.0.0"),
-            redirect_url: std::env::var("PAIR_REDIRECT_URL")
-                .context("PAIR_REDIRECT_URL is required (where /token/<code> sends users on success)")?,
+            redirect_url: std::env::var("PAIR_REDIRECT_URL").context(
+                "PAIR_REDIRECT_URL is required (where /token/<code> sends users on success)",
+            )?,
             token_ttl: Duration::from_secs(parse_env("PAIR_TOKEN_TTL_SECS", "300")?),
             cookie_name: env_or("PAIR_COOKIE_NAME", "authelia_session"),
             cookie_value: env_or("PAIR_COOKIE_VALUE", "valid"),
-            cookie_domain: std::env::var("PAIR_COOKIE_DOMAIN").ok().filter(|s| !s.is_empty()),
+            cookie_domain: std::env::var("PAIR_COOKIE_DOMAIN")
+                .ok()
+                .filter(|s| !s.is_empty()),
             cookie_path: env_or("PAIR_COOKIE_PATH", "/"),
             cookie_max_age: Duration::from_secs(parse_env("PAIR_COOKIE_MAX_AGE_SECS", "2592000")?),
             cookie_secure: parse_bool_env("PAIR_COOKIE_SECURE", true)?,
@@ -200,8 +203,8 @@ async fn use_token(
     if !ok {
         return Err(StatusCode::NOT_FOUND);
     }
-    let header_value = build_set_cookie(&s.config)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let header_value =
+        build_set_cookie(&s.config).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut resp = Redirect::to(&s.config.redirect_url).into_response();
     resp.headers_mut().insert(header::SET_COOKIE, header_value);
     Ok(resp)
@@ -356,8 +359,17 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
         let loc = resp.headers().get(header::LOCATION).unwrap();
         assert_eq!(loc, "https://app.example.com/");
-        let cookie = resp.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap();
-        assert!(cookie.starts_with("authelia_session=valid"), "cookie was {}", cookie);
+        let cookie = resp
+            .headers()
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(
+            cookie.starts_with("authelia_session=valid"),
+            "cookie was {}",
+            cookie
+        );
         assert!(cookie.contains("Path=/"));
         assert!(cookie.contains("Domain=.example.com"));
         assert!(cookie.contains("Max-Age=86400"));
@@ -416,9 +428,7 @@ mod tests {
     async fn expired_tokens_cannot_be_consumed() {
         let store = Arc::new(TokenStore::default());
         let ttl = Duration::from_millis(1);
-        store
-            .mint("123456".into(), Instant::now(), ttl)
-            .await;
+        store.mint("123456".into(), Instant::now(), ttl).await;
         // Wait past TTL.
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(!store.consume("123456", Instant::now(), ttl).await);
@@ -430,7 +440,9 @@ mod tests {
         let ttl = Duration::from_millis(1);
         // Drop in a stale entry, then mint a fresh one — the fresh
         // mint should sweep the stale.
-        store.mint("aaa".into(), Instant::now() - Duration::from_secs(60), ttl).await;
+        store
+            .mint("aaa".into(), Instant::now() - Duration::from_secs(60), ttl)
+            .await;
         store.mint("bbb".into(), Instant::now(), ttl).await;
         // Only the fresh entry survives.
         assert_eq!(store.len().await, 1);

@@ -350,7 +350,11 @@ mod tests {
             "file:///etc/passwd",
             "//evil.com/x", // scheme-relative — no http(s):// prefix
         ] {
-            assert!(validate_feed_url(bad).is_err(), "{:?} should be rejected", bad);
+            assert!(
+                validate_feed_url(bad).is_err(),
+                "{:?} should be rejected",
+                bad
+            );
         }
     }
 
@@ -469,8 +473,13 @@ mod tests {
     async fn add_group_then_add_feed_propagates_to_in_memory_state() {
         let state = fresh_app_state();
         add_group(&state, "tech").await.unwrap();
-        add_feed_to_group(&state, "tech", "https://lobste.rs/rss").await.unwrap();
-        assert_eq!(state.feeds.read().await.clone(), vec!["https://lobste.rs/rss"]);
+        add_feed_to_group(&state, "tech", "https://lobste.rs/rss")
+            .await
+            .unwrap();
+        assert_eq!(
+            state.feeds.read().await.clone(),
+            vec!["https://lobste.rs/rss"]
+        );
         let groups = state.groups.read().await;
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].name, "tech");
@@ -487,7 +496,9 @@ mod tests {
         assert!(err.contains("does not exist"));
         assert!(state.feeds.read().await.is_empty());
         let conn = state.db.lock().await;
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM feed_subscription", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM feed_subscription", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 0);
     }
 
@@ -529,9 +540,15 @@ mod tests {
     async fn remove_feed_from_group_drops_only_that_subscription() {
         let state = fresh_app_state();
         add_group(&state, "tech").await.unwrap();
-        add_feed_to_group(&state, "tech", "https://a/rss").await.unwrap();
-        add_feed_to_group(&state, "tech", "https://b/rss").await.unwrap();
-        remove_feed_from_group(&state, "tech", "https://a/rss").await.unwrap();
+        add_feed_to_group(&state, "tech", "https://a/rss")
+            .await
+            .unwrap();
+        add_feed_to_group(&state, "tech", "https://b/rss")
+            .await
+            .unwrap();
+        remove_feed_from_group(&state, "tech", "https://a/rss")
+            .await
+            .unwrap();
         let groups = state.groups.read().await;
         let feeds = state.feeds.read().await;
         let urls: Vec<String> = groups[0]
@@ -559,8 +576,12 @@ mod tests {
         // in-memory state, not just the DB.
         let state = fresh_app_state();
         add_group(&state, "tech").await.unwrap();
-        add_feed_to_group(&state, "tech", "https://a/rss").await.unwrap();
-        add_feed_to_group(&state, "tech", "https://b/rss").await.unwrap();
+        add_feed_to_group(&state, "tech", "https://a/rss")
+            .await
+            .unwrap();
+        add_feed_to_group(&state, "tech", "https://b/rss")
+            .await
+            .unwrap();
         remove_group(&state, "tech").await.unwrap();
         assert!(state.groups.read().await.is_empty());
         assert!(state.feeds.read().await.is_empty());
@@ -574,7 +595,10 @@ mod tests {
     #[tokio::test]
     async fn remove_group_errors_when_not_found() {
         let state = fresh_app_state();
-        let err = remove_group(&state, "missing").await.unwrap_err().to_string();
+        let err = remove_group(&state, "missing")
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("does not exist"));
     }
 
@@ -583,7 +607,9 @@ mod tests {
         let state = fresh_app_state();
         add_group(&state, "first").await.unwrap();
         add_group(&state, "second").await.unwrap();
-        add_feed_to_group(&state, "first", "https://x/rss").await.unwrap();
+        add_feed_to_group(&state, "first", "https://x/rss")
+            .await
+            .unwrap();
         let groups = list_groups(&state).await.unwrap();
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].name, "first");

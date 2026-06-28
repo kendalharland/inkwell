@@ -189,7 +189,10 @@ scheduler:
   article_ttl_days: 7
 "#;
         let c: ConfigFile = serde_yml::from_str(yaml).unwrap();
-        assert_eq!(c.scheduler.unwrap().log_file, PathBuf::from("./inkwell.log"));
+        assert_eq!(
+            c.scheduler.unwrap().log_file,
+            PathBuf::from("./inkwell.log")
+        );
     }
 
     #[test]

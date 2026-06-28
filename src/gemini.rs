@@ -25,12 +25,7 @@
 //! and paragraphs as text, and hoist every link to its own `=> URL
 //! text` line directly after the paragraph that referenced it.
 
-use std::{
-    fmt::Write as _,
-    path::Path,
-    sync::Arc,
-    time::Duration,
-};
+use std::{fmt::Write as _, path::Path, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use scraper::Html;
@@ -82,11 +77,7 @@ pub async fn serve(state: Arc<AppState>, cfg: GeminiConfig) -> Result<()> {
 }
 
 fn build_acceptor(cfg: &GeminiConfig) -> Result<TlsAcceptor> {
-    let (cert_pem, key_pem) = load_or_generate_pem(
-        &cfg.cert_pem,
-        &cfg.key_pem,
-        &cfg.hostnames,
-    )?;
+    let (cert_pem, key_pem) = load_or_generate_pem(&cfg.cert_pem, &cfg.key_pem, &cfg.hostnames)?;
     let certs = rustls_pemfile::certs(&mut cert_pem.as_bytes())
         .collect::<std::result::Result<Vec<_>, _>>()
         .context("parsing gemini cert PEM")?;
@@ -111,10 +102,10 @@ fn build_acceptor(cfg: &GeminiConfig) -> Result<TlsAcceptor> {
 /// both files, and return them. Subsequent launches will then load.
 fn load_or_generate_pem(cert: &Path, key: &Path, hostnames: &[String]) -> Result<(String, String)> {
     if cert.exists() && key.exists() {
-        let c = std::fs::read_to_string(cert)
-            .with_context(|| format!("reading {}", cert.display()))?;
-        let k = std::fs::read_to_string(key)
-            .with_context(|| format!("reading {}", key.display()))?;
+        let c =
+            std::fs::read_to_string(cert).with_context(|| format!("reading {}", cert.display()))?;
+        let k =
+            std::fs::read_to_string(key).with_context(|| format!("reading {}", key.display()))?;
         return Ok((c, k));
     }
     tracing::info!(
@@ -128,8 +119,7 @@ fn load_or_generate_pem(cert: &Path, key: &Path, hostnames: &[String]) -> Result
     } else {
         hostnames.to_vec()
     };
-    let ck = rcgen::generate_simple_self_signed(names)
-        .context("generating self-signed cert")?;
+    let ck = rcgen::generate_simple_self_signed(names).context("generating self-signed cert")?;
     let cert_pem = ck.cert.pem();
     let key_pem = ck.key_pair.serialize_pem();
     if let Some(p) = cert.parent() {
@@ -227,7 +217,10 @@ impl GemResponse {
         Self { status: 20, body }
     }
     fn not_found() -> Self {
-        Self { status: 51, body: "Not found".into() }
+        Self {
+            status: 51,
+            body: "Not found".into(),
+        }
     }
 }
 
@@ -317,32 +310,15 @@ fn render_listing(
         } else {
             String::new()
         };
-        writeln!(
-            out,
-            "=> /item/{} {} — {}{}",
-            e.iid, e.title, e.host, source
-        )
-        .unwrap();
+        writeln!(out, "=> /item/{} {} — {}{}", e.iid, e.title, e.host, source).unwrap();
     }
     if total_pages > 1 {
         out.push('\n');
         if page_num > 1 {
-            writeln!(
-                out,
-                "=> {}?page={} Previous page",
-                base_path,
-                page_num - 1
-            )
-            .unwrap();
+            writeln!(out, "=> {}?page={} Previous page", base_path, page_num - 1).unwrap();
         }
         if page_num < total_pages {
-            writeln!(
-                out,
-                "=> {}?page={} Next page",
-                base_path,
-                page_num + 1
-            )
-            .unwrap();
+            writeln!(out, "=> {}?page={} Next page", base_path, page_num + 1).unwrap();
         }
         writeln!(out, "Page {} of {}", page_num, total_pages).unwrap();
     }
@@ -475,11 +451,7 @@ async fn render_one_item(state: Arc<AppState>, iid: &str) -> GemResponse {
             'outer: for &i in &all_idxs {
                 let Some(cf) = cache.get(&i) else { continue };
                 for e in &cf.parsed.entries {
-                    let l = e
-                        .links
-                        .first()
-                        .map(|l| l.href.clone())
-                        .unwrap_or_default();
+                    let l = e.links.first().map(|l| l.href.clone()).unwrap_or_default();
                     if l.is_empty() {
                         continue;
                     }
@@ -655,7 +627,11 @@ fn emit_element(el: scraper::ElementRef, out: &mut String) {
             // as a standalone link.
             if let Some(href) = el.value().attr("href") {
                 let text = inline_text(el);
-                let text = if text.trim().is_empty() { href } else { text.trim() };
+                let text = if text.trim().is_empty() {
+                    href
+                } else {
+                    text.trim()
+                };
                 writeln!(out, "=> {} {}", href, text).unwrap();
             }
         }
@@ -683,11 +659,7 @@ fn inline_text_and_links(el: scraper::ElementRef) -> (String, Vec<(String, Strin
     (text, links)
 }
 
-fn walk_inline(
-    el: scraper::ElementRef,
-    text: &mut String,
-    links: &mut Vec<(String, String)>,
-) {
+fn walk_inline(el: scraper::ElementRef, text: &mut String, links: &mut Vec<(String, String)>) {
     for child in el.children() {
         if let Some(child_el) = scraper::ElementRef::wrap(child) {
             match child_el.value().name() {

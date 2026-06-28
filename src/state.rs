@@ -68,4 +68,3 @@ pub struct AppState {
     /// parties to fan out to.
     pub feed_search: crate::config::FeedSearchConfig,
 }
-

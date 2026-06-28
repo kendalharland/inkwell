@@ -149,7 +149,13 @@ pub fn render_entries(
     let pager = if total_pages > 1 {
         let mut p = String::from("<div class='pager'>");
         if page_num > 1 {
-            write!(p, "<a href='{}?page={}'>Previous</a>", base_path, page_num - 1).unwrap();
+            write!(
+                p,
+                "<a href='{}?page={}'>Previous</a>",
+                base_path,
+                page_num - 1
+            )
+            .unwrap();
         }
         write!(p, "<span>Page {} of {}</span>", page_num, total_pages).unwrap();
         if page_num < total_pages {
@@ -320,11 +326,21 @@ mod tests {
             "value='https://example.com/?q=it&#x27;s'",
             "value='What&#x27;s new &#x27; onfocus=&#x27;alert(1)'",
         ] {
-            assert!(out.contains(v), "missing expected escaped attr {}\nin: {}", v, out);
+            assert!(
+                out.contains(v),
+                "missing expected escaped attr {}\nin: {}",
+                v,
+                out
+            );
         }
         // The form structure must still be intact: every `value=` must
         // immediately precede a single quote (not a bare apostrophe
         // from the title leaking in).
-        assert_eq!(out.matches("value='").count(), 3, "form attrs torn: {}", out);
+        assert_eq!(
+            out.matches("value='").count(),
+            3,
+            "form attrs torn: {}",
+            out
+        );
     }
 }

@@ -35,7 +35,9 @@ pub fn item_id(link: &str) -> String {
 /// inject markup or shell-like sequences through the path parameter
 /// (see #16).
 pub fn is_valid_iid(s: &str) -> bool {
-    s.len() == 16 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    s.len() == 16
+        && s.chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 /// One outbound HTTP + parse. No caching, no retry — caller decides.
@@ -151,11 +153,7 @@ pub fn collect_entries(
             .map(|t| t.content.clone())
             .unwrap_or(fallback);
         for e in &cf.parsed.entries {
-            let link = e
-                .links
-                .first()
-                .map(|l| l.href.clone())
-                .unwrap_or_default();
+            let link = e.links.first().map(|l| l.href.clone()).unwrap_or_default();
             if link.is_empty() {
                 continue;
             }
@@ -217,12 +215,18 @@ mod tests {
 
     #[test]
     fn item_id_is_deterministic() {
-        assert_eq!(item_id("https://example.com/a"), item_id("https://example.com/a"));
+        assert_eq!(
+            item_id("https://example.com/a"),
+            item_id("https://example.com/a")
+        );
     }
 
     #[test]
     fn item_id_changes_with_url() {
-        assert_ne!(item_id("https://example.com/a"), item_id("https://example.com/b"));
+        assert_ne!(
+            item_id("https://example.com/a"),
+            item_id("https://example.com/b")
+        );
     }
 
     #[test]
@@ -259,7 +263,7 @@ mod tests {
             "0123456789abcde\"",   // quote
             "0123456789abc<\"\">", // tag bait
             "../../../etc/passwd",
-            "0123 456789abcdef",   // space
+            "0123 456789abcdef", // space
         ] {
             assert!(!is_valid_iid(bad), "{:?} should be rejected", bad);
         }
@@ -328,7 +332,8 @@ mod tests {
     }
 
     fn rss_with(items: &[(&str, &str, &str)]) -> feed_rs::model::Feed {
-        let mut body = String::from(r#"<?xml version="1.0"?><rss version="2.0"><channel><title>F1</title>"#);
+        let mut body =
+            String::from(r#"<?xml version="1.0"?><rss version="2.0"><channel><title>F1</title>"#);
         for (title, link, pub_iso) in items {
             body.push_str(&format!(
                 "<item><title>{}</title><link>{}</link><pubDate>{}</pubDate></item>",
@@ -343,12 +348,30 @@ mod tests {
     fn collect_entries_sorts_newest_first() {
         let feeds = vec!["https://example.com/feed".to_string()];
         let parsed = rss_with(&[
-            ("Old", "https://example.com/a", "Mon, 01 Jan 2024 00:00:00 GMT"),
-            ("New", "https://example.com/b", "Mon, 01 Jan 2026 00:00:00 GMT"),
-            ("Mid", "https://example.com/c", "Mon, 01 Jan 2025 00:00:00 GMT"),
+            (
+                "Old",
+                "https://example.com/a",
+                "Mon, 01 Jan 2024 00:00:00 GMT",
+            ),
+            (
+                "New",
+                "https://example.com/b",
+                "Mon, 01 Jan 2026 00:00:00 GMT",
+            ),
+            (
+                "Mid",
+                "https://example.com/c",
+                "Mon, 01 Jan 2025 00:00:00 GMT",
+            ),
         ]);
         let mut cache = HashMap::new();
-        cache.insert(0, CachedFeed { parsed, fetched_at: std::time::SystemTime::now() });
+        cache.insert(
+            0,
+            CachedFeed {
+                parsed,
+                fetched_at: std::time::SystemTime::now(),
+            },
+        );
         let entries = collect_entries(&feeds, &cache, &[0]);
         let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
         assert_eq!(titles, vec!["New", "Mid", "Old"]);
@@ -364,7 +387,13 @@ mod tests {
             </channel></rss>"#;
         let parsed = feed_rs::parser::parse(body.as_bytes()).unwrap();
         let mut cache = HashMap::new();
-        cache.insert(0, CachedFeed { parsed, fetched_at: std::time::SystemTime::now() });
+        cache.insert(
+            0,
+            CachedFeed {
+                parsed,
+                fetched_at: std::time::SystemTime::now(),
+            },
+        );
         let entries = collect_entries(&feeds, &cache, &[0]);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "has link");
@@ -373,11 +402,19 @@ mod tests {
     #[test]
     fn collect_entries_pulls_host_from_link() {
         let feeds = vec!["https://example.com/feed".to_string()];
-        let parsed = rss_with(&[
-            ("a", "https://foo.example.com/path", "Mon, 01 Jan 2025 00:00:00 GMT"),
-        ]);
+        let parsed = rss_with(&[(
+            "a",
+            "https://foo.example.com/path",
+            "Mon, 01 Jan 2025 00:00:00 GMT",
+        )]);
         let mut cache = HashMap::new();
-        cache.insert(0, CachedFeed { parsed, fetched_at: std::time::SystemTime::now() });
+        cache.insert(
+            0,
+            CachedFeed {
+                parsed,
+                fetched_at: std::time::SystemTime::now(),
+            },
+        );
         let entries = collect_entries(&feeds, &cache, &[0]);
         assert_eq!(entries[0].host, "foo.example.com");
     }
@@ -385,11 +422,19 @@ mod tests {
     #[test]
     fn collect_entries_uses_feed_title_when_set() {
         let feeds = vec!["https://example.com/feed".to_string()];
-        let parsed = rss_with(&[
-            ("a", "https://example.com/x", "Mon, 01 Jan 2025 00:00:00 GMT"),
-        ]);
+        let parsed = rss_with(&[(
+            "a",
+            "https://example.com/x",
+            "Mon, 01 Jan 2025 00:00:00 GMT",
+        )]);
         let mut cache = HashMap::new();
-        cache.insert(0, CachedFeed { parsed, fetched_at: std::time::SystemTime::now() });
+        cache.insert(
+            0,
+            CachedFeed {
+                parsed,
+                fetched_at: std::time::SystemTime::now(),
+            },
+        );
         let entries = collect_entries(&feeds, &cache, &[0]);
         assert_eq!(entries[0].feed_title, "F1");
     }
@@ -401,11 +446,19 @@ mod tests {
         // would silently break the read-later flow's "where did it
         // come from" link. Pin the round-trip.
         let feeds = vec!["https://example.com/feed".to_string()];
-        let parsed = rss_with(&[
-            ("a", "https://example.com/articles/42", "Mon, 01 Jan 2025 00:00:00 GMT"),
-        ]);
+        let parsed = rss_with(&[(
+            "a",
+            "https://example.com/articles/42",
+            "Mon, 01 Jan 2025 00:00:00 GMT",
+        )]);
         let mut cache = HashMap::new();
-        cache.insert(0, CachedFeed { parsed, fetched_at: std::time::SystemTime::now() });
+        cache.insert(
+            0,
+            CachedFeed {
+                parsed,
+                fetched_at: std::time::SystemTime::now(),
+            },
+        );
         let entries = collect_entries(&feeds, &cache, &[0]);
         assert_eq!(entries[0].url, "https://example.com/articles/42");
         // And the iid is derived from that URL, so they're linked.
