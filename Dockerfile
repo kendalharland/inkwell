@@ -21,13 +21,16 @@ RUN apt-get update && \
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY pair ./pair
 
 # BuildKit cache mounts so iterative rebuilds reuse the cargo registry
 # and the target directory. The binary is copied out to a stable path
 # so the next stage doesn't need to know about /src/target.
+# -p inkwell scopes the build to the server binary; the pair sidecar
+# ships as its own image and isn't needed here.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked && \
+    cargo build --release --locked -p inkwell && \
     cp /src/target/release/inkwell /tmp/inkwell
 
 # ---- runtime ---------------------------------------------------------------
