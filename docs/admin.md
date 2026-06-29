@@ -22,11 +22,11 @@ error.
 
 ### Remove a group
 
-Each group in the admin list has a **Remove group** button. Confirming
-the prompt deletes the group along with its feed subscriptions. The
-articles those feeds had cached are not touched — they stay in the
-read-later list and continue to appear under any other group still
-subscribed to the same feed.
+A small × icon next to each group's heading removes the group.
+Confirming the prompt deletes the group along with its feed
+subscriptions. The articles those feeds had cached are not touched —
+they stay in the read-later list and continue to appear under any
+other group still subscribed to the same feed.
 
 ## Feeds
 
@@ -47,9 +47,10 @@ schemes.
 
 ### Remove a feed
 
-Each feed row has a **Remove** button that drops the subscription
-from that group only. If the same feed is subscribed under multiple
-groups, only the chosen group's subscription is removed.
+A small × icon next to each feed URL removes that subscription after
+a confirmation prompt. Only the chosen group's subscription is
+removed — if the same feed is subscribed under multiple groups, the
+others are untouched.
 
 ## Import OPML
 

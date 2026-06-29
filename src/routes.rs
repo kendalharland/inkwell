@@ -658,10 +658,26 @@ async fn admin_index(
 
     let mut groups_html = String::new();
     for g in &groups {
+        let name_attr = encode_single_quoted_attribute(&g.name);
+        let name_text = encode_text(&g.name);
+        // Group heading: name + small × delete icon. The confirmation
+        // prompt scrubs the single-quote out of the name so it can't
+        // close the JS string passed to confirm().
+        let group_js = name_text.replace('\'', "");
         write!(
             groups_html,
-            "<section class='admin-group'><h2>{name}</h2>",
-            name = encode_text(&g.name)
+            "<section class='admin-group'>\
+             <h2>\
+               <span class='admin-group-name'>{name}</span>\
+               <form method='post' action='/admin/group/remove' class='inline group-delete' \
+                     onsubmit=\"return confirm('Remove group {group_js} and its feeds?');\">\
+                 <input type='hidden' name='name' value='{name_attr}'>\
+                 <button type='submit' class='btn-icon' aria-label='Remove group {name_attr}' title='Remove group'>\u{00d7}</button>\
+               </form>\
+             </h2>",
+            name = name_text,
+            name_attr = name_attr,
+            group_js = group_js,
         )
         .unwrap();
         if g.feeds.is_empty() {
@@ -669,16 +685,22 @@ async fn admin_index(
         } else {
             groups_html.push_str("<ul class='list'>");
             for url in &g.feeds {
+                let url_text = encode_text(url);
+                let url_attr = encode_single_quoted_attribute(url);
+                let url_js = url_text.replace('\'', "");
                 write!(
                     groups_html,
                     "<li><span class='meta'>{url}</span>\
-                     <form method='post' action='/admin/feed/remove' class='inline'>\
-                     <input type='hidden' name='group' value='{group}'>\
-                     <input type='hidden' name='url' value='{url}'>\
-                     <button type='submit'>Remove</button>\
+                     <form method='post' action='/admin/feed/remove' class='inline' \
+                           onsubmit=\"return confirm('Remove {url_js} from this group?');\">\
+                       <input type='hidden' name='group' value='{group}'>\
+                       <input type='hidden' name='url' value='{url_attr}'>\
+                       <button type='submit' class='btn-icon' aria-label='Remove feed {url_attr}' title='Remove feed'>\u{00d7}</button>\
                      </form></li>",
-                    url = encode_text(url),
-                    group = encode_text(&g.name),
+                    url = url_text,
+                    url_js = url_js,
+                    url_attr = url_attr,
+                    group = name_attr,
                 )
                 .unwrap();
             }
@@ -687,16 +709,12 @@ async fn admin_index(
         write!(
             groups_html,
             "<form method='post' action='/admin/feed/add' class='inline'>\
-             <input type='hidden' name='group' value='{group}'>\
-             <input type='url' name='url' placeholder='https://example.com/feed.xml' required size='40'>\
-             <button type='submit'>Add feed</button>\
+               <input type='hidden' name='group' value='{group}'>\
+               <input type='url' name='url' placeholder='https://example.com/feed.xml' required size='40'>\
+               <button type='submit' class='btn-compact'>Add feed</button>\
              </form>\
-             <form method='post' action='/admin/group/remove' class='inline' onsubmit=\"return confirm('Remove group {group_js} and its feeds?');\">\
-             <input type='hidden' name='name' value='{group}'>\
-             <button type='submit'>Remove group</button>\
-             </form></section>",
-            group = encode_text(&g.name),
-            group_js = encode_text(&g.name).replace('\'', ""),
+             </section>",
+            group = name_attr,
         )
         .unwrap();
     }
@@ -1215,6 +1233,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admin_index_renders_toolbar_before_group_sections() {
+        // Issue #23: the add-group and import-OPML forms now live in a
+        // top-of-page toolbar instead of taking up two full-width
+        // sections at the bottom. Pin the order (toolbar first, then
+        // group sections) so a future template edit doesn't quietly
+        // move them back.
+        let state = fresh_app_state();
+        // Seed a group so a section is rendered too.
+        router(state.clone())
+            .oneshot(post("/admin/group/add", "name=Tech"))
+            .await
+            .unwrap();
+        let resp = router(state.clone()).oneshot(get("/admin")).await.unwrap();
+        let html = body_string(resp).await;
+
+        let toolbar_pos = html
+            .find("class=\"admin-toolbar\"")
+            .expect("admin-toolbar present");
+        let group_pos = html
+            .find("class='admin-group'")
+            .expect("admin-group section present");
+        assert!(
+            toolbar_pos < group_pos,
+            "toolbar must render above per-group sections"
+        );
+        // Toolbar carries both forms.
+        assert!(html.contains("action=\"/admin/group/add\""));
+        assert!(html.contains("action=\"/admin/import-opml\""));
+    }
+
+    #[tokio::test]
+    async fn admin_index_renders_inline_delete_icons_on_groups_and_feeds() {
+        // The remove-group / remove-feed full-text buttons are gone;
+        // both are now small × icons (.btn-icon) so the group section
+        // reads as a list, not a row of heavy controls.
+        let state = fresh_app_state();
+        router(state.clone())
+            .oneshot(post("/admin/group/add", "name=Tech"))
+            .await
+            .unwrap();
+        router(state.clone())
+            .oneshot(post(
+                "/admin/feed/add",
+                "group=Tech&url=https%3A%2F%2Fa.example%2Frss",
+            ))
+            .await
+            .unwrap();
+        let resp = router(state.clone()).oneshot(get("/admin")).await.unwrap();
+        let html = body_string(resp).await;
+
+        // No `Remove`/`Remove group` text buttons left over.
+        assert!(!html.contains(">Remove group<"), "found legacy text button");
+        assert!(!html.contains(">Remove<"), "found legacy text button");
+        // Inline icon buttons present, scoped to the right actions.
+        assert!(html.contains("action='/admin/group/remove'"));
+        assert!(html.contains("action='/admin/feed/remove'"));
+        assert!(html.contains("class='btn-icon'"));
+        // The × glyph is U+00D7.
+        assert!(html.contains("\u{00d7}"));
+        // Feed removal now also confirms first (used to skip the prompt).
+        assert!(html.contains("Remove https://a.example/rss from this group?"));
+    }
+
+    #[tokio::test]
     async fn admin_add_group_and_list_through_http() {
         // Whole-flow regression: form post → admin handler → DB ops →
         // apply_from_db → next request sees the new group rendered.
@@ -1228,7 +1310,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let html = body_string(resp).await;
         assert!(
-            html.contains(">Tech</h2>"),
+            html.contains(">Tech<"),
             "expected group heading, got: {}",
             html
         );
@@ -1302,7 +1384,7 @@ mod tests {
         let resp = router(state.clone()).oneshot(get("/admin")).await.unwrap();
         let html = body_string(resp).await;
         assert!(html.contains("https://a.example/rss"));
-        assert!(html.contains(">Tech</h2>"));
+        assert!(html.contains(">Tech<"));
     }
 
     #[tokio::test]
@@ -1314,7 +1396,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
         let resp = router(state.clone()).oneshot(get("/admin")).await.unwrap();
         let html = body_string(resp).await;
-        assert!(html.contains(">Uncategorized</h2>"));
+        assert!(html.contains(">Uncategorized<"));
     }
 
     #[tokio::test]

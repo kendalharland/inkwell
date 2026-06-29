@@ -27,6 +27,58 @@ pub fn blocked_message(url: &str, reason: &str) -> String {
     )
 }
 
+/// Page body returned for URLs whose Content-Type is a non-HTML
+/// resource (PDF, image, archive, etc.). Readability would otherwise
+/// see opaque bytes, fail mysteriously, and the cache would fill with
+/// "Could not extract readable content." entries. Linking to the
+/// original lets the device's native viewer handle it.
+pub fn binary_resource_message(url: &str, kind: &str) -> String {
+    format!(
+        "{marker}<p>This article is a <strong>{kind}</strong>, not a web page. \
+         Open it directly in the device's viewer:</p>\
+         <p><a href='{url}'>{url}</a></p>",
+        marker = BLOCKED_MARKER,
+        kind = encode_text(kind),
+        url = encode_text(url),
+    )
+}
+
+/// Map a `Content-Type` header value to a friendly resource label, or
+/// `None` when the response looks like normal HTML/XHTML and should
+/// flow through readability as usual. Anything else returns
+/// `Some(label)` and bypasses extraction.
+fn non_html_resource_kind(content_type: Option<&str>, url: &str) -> Option<String> {
+    let ct = content_type.map(|c| c.split(';').next().unwrap_or(c).trim().to_ascii_lowercase());
+    let by_header = ct.as_deref().and_then(|c| match c {
+        "text/html" | "application/xhtml+xml" => None,
+        "application/pdf" => Some("PDF document".to_string()),
+        c if c.starts_with("image/") => Some(format!("{} image", c.trim_start_matches("image/"))),
+        c if c.starts_with("video/") => Some("video".to_string()),
+        c if c.starts_with("audio/") => Some("audio file".to_string()),
+        "application/zip" | "application/x-zip-compressed" => Some("zip archive".to_string()),
+        "application/octet-stream" => Some("binary file".to_string()),
+        c if c.starts_with("text/") => None,
+        c if c.starts_with("application/") && (c.contains("xml") || c.contains("json")) => None,
+        _ => Some("non-HTML file".to_string()),
+    });
+    if by_header.is_some() {
+        return by_header;
+    }
+    // Some servers omit Content-Type or serve PDFs with a generic
+    // `application/octet-stream`; fall back to the URL path so a `.pdf`
+    // tail still lands in the binary path.
+    let path = url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .to_ascii_lowercase();
+    if path.ends_with(".pdf") {
+        Some("PDF document".to_string())
+    } else {
+        None
+    }
+}
+
 /// Fetch `url`, run readability, return clean HTML — or a blocked-message
 /// HTML body if anything between the user's tap and a readable article
 /// goes wrong. Never panics, never errors. The caller distinguishes blocked
@@ -45,6 +97,17 @@ pub async fn extract_url(http: &reqwest::Client, url: &str) -> String {
     }
     if status.is_client_error() || status.is_server_error() {
         return blocked_message(url, &format!("Site returned HTTP {}.", status.as_u16()));
+    }
+    // Branch on Content-Type before consuming the body: a PDF (or any
+    // non-HTML resource) goes straight to a link card, sparing
+    // readability the opaque bytes and the user a wall of mojibake.
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    if let Some(kind) = non_html_resource_kind(content_type.as_deref(), url) {
+        return binary_resource_message(url, &kind);
     }
     let body = match resp.text().await {
         Ok(b) => b,
@@ -240,5 +303,73 @@ mod tests {
         // rarely simple-format raster images.
         let out = sanitize_images(r#"<img src="data:image/webp;base64,xxx" alt="x">"#);
         assert!(out.contains("img-fallback"));
+    }
+
+    // ----- non-HTML resource detection (issue #20) ------------------------
+
+    #[test]
+    fn non_html_kind_passes_through_html_and_xhtml() {
+        assert!(non_html_resource_kind(Some("text/html"), "https://x/a").is_none());
+        assert!(non_html_resource_kind(Some("text/html; charset=utf-8"), "https://x/a").is_none());
+        assert!(non_html_resource_kind(Some("application/xhtml+xml"), "https://x/a").is_none());
+    }
+
+    #[test]
+    fn non_html_kind_flags_pdf_by_content_type() {
+        let kind = non_html_resource_kind(Some("application/pdf"), "https://x/paper").unwrap();
+        assert_eq!(kind, "PDF document");
+    }
+
+    #[test]
+    fn non_html_kind_flags_pdf_by_path_when_content_type_missing() {
+        // The actual issue report: cl.cam.ac.uk serves a PDF where the
+        // path ends with .pdf but the server's Content-Type may be
+        // missing or generic.
+        let kind = non_html_resource_kind(None, "https://www.cl.cam.ac.uk/~nk480/parsing.pdf");
+        assert_eq!(kind.as_deref(), Some("PDF document"));
+        // And the URL-tail rule still fires when the header is the
+        // generic octet-stream that some servers emit.
+        let kind = non_html_resource_kind(
+            Some("application/octet-stream"),
+            "https://x/paper.pdf?download=1",
+        );
+        assert!(
+            kind.is_some(),
+            "octet-stream PDF must not slip into readability"
+        );
+    }
+
+    #[test]
+    fn non_html_kind_flags_images_videos_audio_archives() {
+        assert!(non_html_resource_kind(Some("image/jpeg"), "https://x/photo").is_some());
+        assert!(non_html_resource_kind(Some("video/mp4"), "https://x/clip").is_some());
+        assert!(non_html_resource_kind(Some("audio/mpeg"), "https://x/song").is_some());
+        assert!(non_html_resource_kind(Some("application/zip"), "https://x/bundle").is_some());
+    }
+
+    #[test]
+    fn non_html_kind_lets_xml_and_json_through_to_readability() {
+        // Atom feeds, JSON-feed bodies, etc. — readability will fail
+        // on them, but the blocked-message path is the right response,
+        // not the "this is a binary file" card.
+        assert!(non_html_resource_kind(Some("application/atom+xml"), "https://x/feed").is_none());
+        assert!(non_html_resource_kind(Some("application/json"), "https://x/feed").is_none());
+    }
+
+    #[test]
+    fn binary_resource_message_includes_marker_kind_and_link() {
+        let out = binary_resource_message("https://x/paper.pdf", "PDF document");
+        assert!(out.contains(BLOCKED_MARKER));
+        assert!(out.contains("PDF document"));
+        assert!(out.contains("href='https://x/paper.pdf'"));
+    }
+
+    #[test]
+    fn binary_resource_message_escapes_kind_and_url() {
+        // Same XSS-via-attribute regression class as blocked_message.
+        let out = binary_resource_message("https://x/?a=<b>", "PDF <evil>");
+        assert!(!out.contains("<evil>"));
+        assert!(out.contains("&lt;evil&gt;"));
+        assert!(out.contains("&lt;b&gt;"));
     }
 }

@@ -44,6 +44,18 @@ Each article page includes:
 - A `Back` link returning to the listing page the article was opened
   from, including the page number.
 
+### Non-HTML articles
+
+When a feed entry points to a non-HTML resource — a PDF, an image, a
+video, or another binary file — inkwell does not try to extract it.
+The article page instead renders a short notice and a direct link to
+the original URL, so the device's built-in viewer (the Kindle PDF
+reader, for example) can open it natively.
+
+Detection uses the response's `Content-Type` header first and falls
+back to the URL's path extension (e.g. `.pdf`), so links to PDFs that
+servers return with a generic content type still take this path.
+
 ## Read later (bookmarks)
 
 The bookmark icon next to every article toggles the saved-for-later

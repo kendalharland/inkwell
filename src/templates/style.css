@@ -130,21 +130,71 @@ blockquote {
 .err { border: 1px solid var(--err-border); padding: 1em; background: var(--err-bg); border-radius: 3px; }
 
 .admin-warn { background: var(--warn-bg); border: 1px solid var(--warn-border); padding: .6em .9em; font-size: 14px; border-radius: 3px; }
-.admin-group { border: 1px solid var(--soft-border); padding: .7em 1em; margin: 1em 0; border-radius: 4px; }
-.admin-group h2 { margin: 0 0 .5em; }
-.admin-group form.inline { display: inline-block; margin-right: .4em; }
-.admin-group input[type=text], .admin-group input[type=url] {
-  padding: .4em .6em; font-size: 15px; font-family: inherit;
+
+/* Top-of-page toolbar holds the Add-group and Import-OPML forms so the
+   page chrome stays tight and the per-group sections start near the
+   top. Wraps on narrow viewports (Kindles in portrait). */
+.admin-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .6em .9em;
+  padding: .5em .8em; margin: .6em 0 1.2em;
+  border: 1px solid var(--soft-border); border-radius: 4px;
+  background: var(--soft);
+}
+.admin-toolbar form.inline { display: flex; flex-wrap: wrap; gap: .35em; align-items: center; margin: 0; }
+.admin-toolbar input[type=text], .admin-toolbar input[type=url] {
+  padding: .35em .55em; font-size: 14px; font-family: inherit;
   border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 3px;
 }
-.admin-group button {
-  padding: .4em .9em; font-size: 14px;
+.admin-toolbar input[type=file] { font-size: 13px; }
+
+.admin-group { border: 1px solid var(--soft-border); padding: .7em 1em; margin: 1em 0; border-radius: 4px; }
+.admin-group h2 {
+  margin: 0 0 .5em;
+  display: flex; align-items: center; gap: .35em;
+}
+.admin-group h2 .admin-group-name { flex: 1; }
+.admin-group h2 .group-delete { display: inline-flex; margin: 0; }
+.admin-group form.inline { display: inline-block; margin-right: .4em; }
+.admin-group input[type=text], .admin-group input[type=url] {
+  padding: .35em .55em; font-size: 14px; font-family: inherit;
+  border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 3px;
+}
+/* :not() excludes the .btn-icon / .btn-compact variants so they keep
+   their own (stripped-down) styling rather than inheriting the full
+   bordered look. */
+.admin-group button:not(.btn-icon):not(.btn-compact) {
+  padding: .3em .7em; font-size: 13px;
   border: 1px solid var(--border); background: var(--soft);
   color: var(--fg); cursor: pointer; font-family: inherit; border-radius: 3px;
 }
-.admin-group button:hover { background: var(--bg); }
-.admin-group ul.list li { display: flex; align-items: center; gap: .7em; padding: .4em 0; }
+.admin-group button:not(.btn-icon):not(.btn-compact):hover { background: var(--bg); }
+.admin-group ul.list li { display: flex; align-items: center; gap: .7em; padding: .35em 0; }
 .admin-group ul.list li .meta { flex: 1; margin: 0; word-break: break-all; }
+
+/* Shared compact and icon button styles, used in the admin toolbar and
+   the per-group sections. .btn-icon strips border and background so a
+   single × character reads as inline UI affordance, not a heavy
+   control. */
+.btn-compact {
+  padding: .3em .7em; font-size: 13px;
+  border: 1px solid var(--border); background: var(--soft);
+  color: var(--fg); cursor: pointer; font-family: inherit; border-radius: 3px;
+}
+.btn-compact:hover { background: var(--bg); }
+.btn-icon {
+  background: transparent;
+  border: none;
+  padding: 0 .25em;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--muted);
+  border-radius: 3px;
+  min-width: 1.6em;
+  font-family: inherit;
+}
+.btn-icon:hover { color: var(--fg); background: var(--soft); }
+.btn-icon:focus { outline: 1px dotted var(--border); outline-offset: 2px; }
 
 .flash { padding: .6em .9em; margin: .9em 0; border: 1px solid; border-radius: 3px; }
 .flash-ok { background: var(--ok-bg); border-color: var(--ok-border); }

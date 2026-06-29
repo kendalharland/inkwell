@@ -15,8 +15,7 @@ without typing a password on it.
    response, and 303-redirects to the configured app URL.
 
 The token store is in-memory. Lost-on-restart is fine — codes are
-short-lived and trivial to regenerate. A Redis-backed store can be
-added later behind a feature flag; the issue tracker tracks this.
+short-lived and trivial to regenerate.
 
 ## Routes
 
@@ -64,6 +63,48 @@ The `-f pair/Dockerfile` points at the sidecar's Dockerfile while
 keeping the build context at the repo root, so the builder can see the
 workspace `Cargo.toml` and `Cargo.lock`.
 
+## docker-compose
+
+Run the sidecar alongside inkwell with a single compose file:
+
+```yaml
+services:
+  inkwell:
+    image: inkwell:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - inkwell-data:/data
+
+  inkwell-pair:
+    image: inkwell-pair:latest
+    build:
+      context: .
+      dockerfile: pair/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PAIR_REDIRECT_URL: https://inkwell.example.com/
+      PAIR_COOKIE_DOMAIN: .example.com
+      PAIR_COOKIE_NAME: authelia_session
+      PAIR_COOKIE_VALUE: ${PAIR_COOKIE_VALUE}
+
+volumes:
+  inkwell-data:
+```
+
+Keep `PAIR_COOKIE_VALUE` (the secret the auth gateway treats as a
+valid session) out of the compose file — pass it through `.env` or a
+secret manager.
+
+The pairing flow is `pair.example.com/generate-token` (gated by the
+auth gateway) to mint a code, then `pair.example.com/token/<code>` on
+the new device, which sets the cookie and redirects to the inkwell
+service.
+
 ## Pairing with authelia
 
 A typical deployment with authelia in front:
@@ -93,18 +134,3 @@ is more involved than a fixed cookie value can support — this sidecar
 is most useful with custom forward-auth shims that accept "session
 exists" as proof.
 
-## Tests
-
-```sh
-cargo test -p inkwell-pair
-```
-
-The test suite covers:
-
-- 6-digit code generation and strict shape validation.
-- Full mint → consume flow (cookie attributes, redirect target, store cleanup).
-- Single-use semantics: a second `/token/<code>` for the same code 404s.
-- Expired codes can't be consumed.
-- Mint sweeps expired entries (no unbounded growth under attack).
-- `Set-Cookie` correctly omits optional attributes when disabled.
-- Env-var parsing for booleans.
