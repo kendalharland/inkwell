@@ -14,5 +14,8 @@ optionally serves the same content over the Gemini protocol.
   from source or Docker.
 - [Self-hosting](self-hosting.md) — docker-compose recipe, reverse
   proxy, backups.
+- [Reading](reading.md) — listings, density, theme, bookmarks, the
+  article view.
+- [Admin](admin.md) — managing groups and feeds, OPML import.
 - [Configuration reference](configuration.md) — every YAML field and
   environment variable, with examples.
