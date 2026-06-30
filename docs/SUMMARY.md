@@ -6,5 +6,5 @@
 - [Self-hosting](self-hosting.md)
 - [Reading](reading.md)
 - [Admin](admin.md)
-- [Pairing sidecar](sidecar.md)
+- [Authenticating your e-reader](sidecar.md)
 - [Configuration reference](configuration.md)

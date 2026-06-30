@@ -13,6 +13,13 @@
   --inkwell-sans:  "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --inkwell-display: "Bricolage Grotesque", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --inkwell-mono:  "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  /* Layout knobs. The column grows with the viewport up to a
+     comfortable readability cap. TOC width and gap are tied together
+     so the body's right margin always matches what the floating TOC
+     actually consumes. */
+  --inkwell-column-max: 92rem;
+  --inkwell-toc-width: 12rem;
+  --inkwell-toc-gap: 5rem;
 }
 
 html, body, .content {
@@ -87,16 +94,22 @@ code, pre, kbd, .hljs {
   --color-scheme: light;
 }
 
-/* Article body is reserved 14rem of right margin (12rem TOC + 2rem
-   gap). The TOC itself uses `position: fixed` and tracks the right
-   edge of <main> via the calc()s further down, so it stays put when
-   the user scrolls the page.                                         */
+/* Article body reserves (TOC width + gap) on the right so the floating
+   TOC has space to live without overlapping running text. The TOC
+   itself uses `position: fixed` and tracks the right edge of <main>
+   via the calc()s further down, so it stays put when the user scrolls.
+   max-width uses min() so the body grows with the viewport up to
+   --inkwell-column-max, and stays inside viewport edges on narrow
+   screens without a media query. */
 .content main {
-  max-width: 72rem;
+  max-width: min(var(--inkwell-column-max), calc(100vw - 4rem));
   margin: 0 auto;
   padding: 1rem 1.75rem 4rem;
 }
-.content main > #main-body { margin-right: 14rem; min-width: 0; }
+.content main > #main-body {
+  margin-right: calc(var(--inkwell-toc-width) + var(--inkwell-toc-gap));
+  min-width: 0;
+}
 
 /* Body links: subtle underline rather than bold color. */
 .content a:link,
@@ -139,23 +152,23 @@ table th { font-family: var(--inkwell-sans); text-align: left; }
   position: fixed;
   /* Below mdBook's sticky menu bar (var --menu-bar-height = 50px). */
   top: calc(var(--menu-bar-height, 50px) + 1.5rem);
-  width: 12rem;
+  width: var(--inkwell-toc-width);
   max-height: calc(100vh - var(--menu-bar-height, 50px) - 3rem);
   overflow-y: auto;
   font-family: var(--inkwell-sans);
   font-size: 13px;
   line-height: 1.5;
   color: #6a6660;
-  /* Right edge of TOC tracks the right edge of <main> (centered with
-     max-width 72rem). Clamp so we never push past 1.5rem viewport
-     padding on smaller screens. */
-  right: max(1.5rem, calc((100vw - 72rem) / 2 + 1.75rem));
+  /* Right edge of TOC tracks the right edge of <main>. Same min() the
+     column itself uses, so the TOC stays aligned with main's right
+     padding as the viewport grows or shrinks. */
+  right: max(1.5rem, calc((100vw - min(var(--inkwell-column-max), calc(100vw - 4rem))) / 2 + 1.75rem));
 }
 /* When mdBook's sidebar is visible, .content is shifted right by the
    sidebar width; recalibrate the TOC's right offset accordingly so it
    keeps aligning with main's right edge. */
 html.sidebar-visible #page-toc {
-  right: max(1.5rem, calc((100vw - var(--sidebar-width, 0px) - 72rem) / 2 + 1.75rem));
+  right: max(1.5rem, calc((100vw - var(--sidebar-width, 0px) - min(var(--inkwell-column-max), calc(100vw - var(--sidebar-width, 0px) - 4rem))) / 2 + 1.75rem));
 }
 
 #page-toc h4 {

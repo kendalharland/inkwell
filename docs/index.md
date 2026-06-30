@@ -17,7 +17,7 @@ JPEG, and optionally serves the same content over the Gemini protocol.
 - [Reading](reading.md) — listings, density, theme, bookmarks, the
   article view.
 - [Admin](admin.md) — managing groups and feeds, OPML import.
-- [Pairing sidecar](sidecar.md) — optional companion service for
-  setting up a new Kindle without typing a password on it.
+- [Authenticating your e-reader](sidecar.md) — sign a new Kindle
+  into the auth gateway without typing a password on the device.
 - [Configuration reference](configuration.md) — every YAML field and
   environment variable, with examples.

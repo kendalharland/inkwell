@@ -1,11 +1,22 @@
-# Pairing sidecar
+# Authenticating your e-reader
 
-`inkwell-pair` is a small standalone HTTP service that mints one-time
-6-digit codes and, when a code is redeemed, sets a session cookie on
-the device that redeemed it. It's designed to sit alongside an
-external auth gateway (authelia, nginx + forward-auth, Authentik,
-etc.) so the operator can pair a new device — typically a Kindle —
-without typing a password on it.
+A new Kindle (or any other e-reader) starts out with no session at
+the inkwell server. Typing a password into the device's onscreen
+keyboard to clear the auth gateway is slow and error-prone — letters
+are tiny, the keyboard lags, and most password managers don't run on
+the device.
+
+`inkwell-pair` is a small companion service that solves this. From an
+already-authenticated browser on a phone or laptop, the operator
+generates a 6-digit code. The e-reader opens
+`/token/<that-code>` once; the service validates the code, sets the
+session cookie on the device, and redirects to the reader. After
+that, the e-reader is signed in and stays signed in.
+
+The service is designed to sit alongside an external auth gateway
+(authelia, nginx + forward-auth, Authentik, etc.) — it doesn't try
+to be an auth gateway itself; it just sets the cookie that gateway
+recognises.
 
 ## Flow
 
