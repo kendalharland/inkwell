@@ -115,19 +115,24 @@ pub async fn run_refresh(state: Arc<AppState>) -> Result<(usize, usize)> {
 /// Delete cached articles older than `article_ttl_secs`, except for
 /// articles the user bookmarked into the "read later" pane — those are
 /// pinned past the TTL so a saved entry doesn't silently vanish.
-/// Returns the number of rows removed.
+/// Returns the number of article rows removed. Image-cache rows older
+/// than the same cutoff are also dropped (no bookmark exemption — the
+/// image proxy will re-fetch on the next view if the article is still
+/// around).
 pub async fn run_purge(state: Arc<AppState>) -> Result<usize> {
     let cutoff = now_secs() - state.article_ttl_secs;
-    let n = {
-        let conn = state.db.lock().await;
-        conn.execute(
-            "DELETE FROM article \
-             WHERE fetched_at < ?1 \
-               AND id NOT IN (SELECT article_id FROM bookmark)",
-            [cutoff],
-        )?
-    };
-    Ok(n)
+    let conn = state.db.lock().await;
+    let articles = conn.execute(
+        "DELETE FROM article \
+         WHERE fetched_at < ?1 \
+           AND id NOT IN (SELECT article_id FROM bookmark)",
+        [cutoff],
+    )?;
+    let images = conn.execute("DELETE FROM image_cache WHERE fetched_at < ?1", [cutoff])?;
+    if images > 0 {
+        tracing::info!("purge: dropped {} stale image(s)", images);
+    }
+    Ok(articles)
 }
 
 /// Generic worker loop. Claims jobs in batches (so backlog is coalesced),
@@ -328,5 +333,35 @@ mod tests {
         // Second purge: now the article is eligible and goes.
         assert_eq!(run_purge(state.clone()).await.unwrap(), 1);
         assert!(article_ids(&state).await.is_empty());
+    }
+
+    async fn seed_image(state: &AppState, hash: &str, fetched_at: i64) {
+        let conn = state.db.lock().await;
+        let bytes: Vec<u8> = vec![0xff, 0xd8, 0xff];
+        conn.execute(
+            "INSERT INTO image_cache (hash, jpeg, fetched_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![hash, bytes, fetched_at],
+        )
+        .unwrap();
+    }
+
+    async fn image_count(state: &AppState) -> i64 {
+        let conn = state.db.lock().await;
+        conn.query_row("SELECT COUNT(*) FROM image_cache", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn run_purge_also_drops_stale_image_cache_rows() {
+        // Issue #21: image cache uses the same TTL as articles. A
+        // stale image whose article has long since aged out should
+        // not stay pinned in the DB indefinitely.
+        let state = fresh_state(30);
+        let fresh = now_secs() - 1;
+        let stale = now_secs() - 365 * 86400;
+        seed_image(&state, "freshhash", fresh).await;
+        seed_image(&state, "stalehash", stale).await;
+        run_purge(state.clone()).await.unwrap();
+        assert_eq!(image_count(&state).await, 1, "only fresh should survive");
     }
 }

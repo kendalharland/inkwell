@@ -38,11 +38,36 @@ renders in a few hundred milliseconds even on a Kindle.
 Each article page includes:
 
 - The article title, with the same bookmark icon used on the listing.
-- The article body, with images sanitized for the Kindle browser
-  (oversized images shrunk, non-HTTPS images stripped, lazy-load
-  attributes normalized).
+- The article body, with images optimized for the Kindle browser (see
+  [Image handling](#image-handling) below).
 - A `Back` link returning to the listing page the article was opened
   from, including the page number.
+
+### Image handling
+
+Every `<img>` in a rendered article is rewritten to flow through
+inkwell's server-side image proxy. The proxy fetches the source,
+decodes it (JPEG, PNG, WebP, GIF), downscales anything larger than
+1200&times;1600 pixels, flattens transparent pixels onto a solid
+background, and re-encodes as JPEG under a 150&nbsp;KiB size budget.
+The result is cached in the same SQLite file used for the article
+cache so subsequent views read from local disk.
+
+A short Cache-Control header lets the Kindle browser hold the image
+in its own cache as well. Images are tagged with
+`style="max-width:100%; height:auto"` so the Kindle scales them to
+the column width regardless of the source dimensions.
+
+If the proxy can't fetch or decode an image (the source returns 404,
+the host is unreachable, the format is unsupported, etc.), it returns
+404 and the Kindle renders the image's alt text in place. Images
+referenced via `data:`, `file:`, or other non-HTTP schemes never hit
+the proxy; they fall back to a styled alt-text block in the article
+body.
+
+The image cache ages out alongside articles — entries older than
+`scheduler.article_ttl_days` are dropped by the same purge job that
+removes stale articles.
 
 ### Non-HTML articles
 

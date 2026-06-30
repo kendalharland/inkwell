@@ -127,19 +127,23 @@ pub async fn extract_url(http: &reqwest::Client, url: &str) -> String {
 // ---------------------------------------------------------------------------
 // Image post-processing
 //
-// The old Kindle browser only reliably renders JPEG, PNG, and GIF. WebP,
-// AVIF, and SVG are increasingly common on modern sites — leaving them
-// in-place produces a broken-image icon and the reader loses the
-// information the picture was carrying.
+// Article HTML often points at images the Kindle browser can't render:
+// WebP, AVIF, oversized JPEGs that the device shrinks ungracefully,
+// transparent PNGs that go black on a monochrome screen. To paper over
+// all of that without making the browser do the work, every `http(s)`
+// `<img>` is rewritten to point at the inkwell `/img` proxy. The proxy
+// (see `crate::img`) fetches the source, downscales to a Kindle-sized
+// box, re-encodes as JPEG under a tight size budget, and caches the
+// result in SQLite.
 //
 // Strategy:
-//   * Supported formats (jpg/jpeg/png/gif) are kept; we ensure an `alt`
-//     attribute exists so the Kindle has fallback text if the network
-//     fetch fails (slow 3G, captive portal, etc.).
-//   * Unsupported formats are replaced with a styled `[alt text]` block
-//     so the article still reads top-to-bottom. If the source had no
-//     alt, we substitute "image" — better a sign-post than nothing.
-//   * Images with no `src` at all are dropped.
+//   * `<img src="http(s)://…">`  →  `<img src="/img?u=…" style="…">`
+//     with a `max-width:100%` style so the Kindle scales the result to
+//     the column width regardless of the source dimensions.
+//   * `<img>` with a non-http(s) src (data:, file:, mailto:, etc.) is
+//     replaced with the alt-text fallback so the article still reads
+//     top-to-bottom even though the image can't load.
+//   * `<img>` with no src at all is dropped.
 
 static IMG_RE: LazyLock<Regex> = LazyLock::new(|| {
     // `<img ...>` or self-closing `<img ... />`. Attribute body captured.
@@ -159,15 +163,8 @@ fn extract_attr(attrs: &str, re: &Regex) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
-fn is_simple_format(src: &str) -> bool {
-    // Pull just the path component — strip query and fragment so
-    // `photo.jpg?w=600` still classifies as a jpg.
-    let lower = src.to_lowercase();
-    let path = lower.split(['?', '#']).next().unwrap_or(&lower);
-    path.ends_with(".jpg")
-        || path.ends_with(".jpeg")
-        || path.ends_with(".png")
-        || path.ends_with(".gif")
+fn is_proxyable_src(src: &str) -> bool {
+    src.starts_with("http://") || src.starts_with("https://")
 }
 
 pub fn sanitize_images(html: &str) -> String {
@@ -178,18 +175,22 @@ pub fn sanitize_images(html: &str) -> String {
             if src.is_empty() {
                 return String::new();
             }
-            let alt = extract_attr(attrs, &ALT_RE);
-            if is_simple_format(&src) {
-                let alt_str = alt.unwrap_or_default();
+            let alt = extract_attr(attrs, &ALT_RE).unwrap_or_default();
+            if is_proxyable_src(&src) {
+                // Route every http(s) image through the /img proxy. The
+                // proxy URL-encodes the original URL, applies the SSRF
+                // host guard, and serves a Kindle-sized JPEG.
                 format!(
-                    r#"<img src="{}" alt="{}">"#,
-                    encode_quoted_attribute(&src),
-                    encode_quoted_attribute(&alt_str)
+                    r#"<img src="/img?u={}" alt="{}" style="max-width:100%; height:auto">"#,
+                    crate::view::url_encode(&src),
+                    encode_quoted_attribute(&alt),
                 )
             } else {
-                let label = alt
-                    .filter(|a| !a.is_empty())
-                    .unwrap_or_else(|| "image".into());
+                let label = if alt.is_empty() {
+                    "image".to_string()
+                } else {
+                    alt
+                };
                 format!(
                     r#"<div class="img-fallback">[{}]</div>"#,
                     encode_text(&label)
@@ -220,47 +221,82 @@ mod tests {
         assert!(msg.contains("&lt;x&gt;"));
     }
 
+    // ----- sanitize_images: http(s) → /img proxy rewrite ------------------
+
     #[test]
-    fn sanitize_keeps_jpg_with_existing_alt() {
+    fn sanitize_rewrites_http_jpg_through_img_proxy() {
         let out = sanitize_images(r#"<img src="https://x.com/p.jpg" alt="A photo">"#);
-        assert_eq!(out, r#"<img src="https://x.com/p.jpg" alt="A photo">"#);
+        assert!(
+            out.contains(r#"src="/img?u=https%3A%2F%2Fx.com%2Fp.jpg""#),
+            "expected proxy rewrite, got: {}",
+            out
+        );
+        assert!(out.contains(r#"alt="A photo""#));
+        assert!(out.contains(r#"style="max-width:100%; height:auto""#));
     }
 
     #[test]
-    fn sanitize_adds_empty_alt_when_missing() {
+    fn sanitize_rewrites_webp_and_avif_the_same_as_jpg() {
+        // Format of the source URL no longer matters at sanitize time —
+        // the /img proxy decodes anything and emits Kindle-friendly
+        // JPEG. The old "webp → alt fallback" path is gone.
+        for ext in ["webp", "avif", "svg", "gif", "png"] {
+            let html = format!(r#"<img src="https://x.com/q.{}" alt="alt">"#, ext);
+            let out = sanitize_images(&html);
+            assert!(out.contains("/img?u="), "{}: {}", ext, out);
+            assert!(!out.contains("img-fallback"), "{}: {}", ext, out);
+        }
+    }
+
+    #[test]
+    fn sanitize_preserves_alt_through_proxy_rewrite() {
+        // Network failures on the proxy fetch are common over slow
+        // mobile — the rewritten `<img>` must still carry alt so the
+        // Kindle has something to show in the broken-image slot.
+        let out = sanitize_images(r#"<img src="https://x.com/photo.jpg" alt="The cat">"#);
+        assert!(out.contains(r#"alt="The cat""#));
+    }
+
+    #[test]
+    fn sanitize_emits_empty_alt_when_source_has_none() {
         let out = sanitize_images(r#"<img src="https://x.com/icon.png">"#);
-        assert_eq!(out, r#"<img src="https://x.com/icon.png" alt="">"#);
+        assert!(out.contains(r#"alt="""#));
     }
 
     #[test]
-    fn sanitize_treats_jpeg_extension_the_same_as_jpg() {
-        let out = sanitize_images(r#"<img src="https://x.com/a.jpeg" alt="x">"#);
-        assert!(out.starts_with("<img"));
-    }
-
-    #[test]
-    fn sanitize_classifies_query_string_url_by_path_extension() {
+    fn sanitize_url_encodes_query_string_in_proxy_target() {
+        // `&` in the original src must survive into the `?u=` value as
+        // `%26`, or the Kindle browser would parse it as a second
+        // query parameter and the proxy would receive a truncated URL.
         let out = sanitize_images(
             r#"<img src="https://cdn.example.com/photo.jpg?w=600&fit=crop" alt="x">"#,
         );
         assert!(
-            out.starts_with("<img"),
-            "expected <img> for jpg with query string, got: {}",
+            out.contains("%26"),
+            "expected & to be percent-encoded: {}",
+            out
+        );
+        assert!(
+            !out.contains("?w=600&fit"),
+            "raw & leaked into proxy URL: {}",
             out
         );
     }
 
     #[test]
-    fn sanitize_replaces_webp_with_alt_fallback() {
-        let out = sanitize_images(r#"<img src="https://x.com/q.webp" alt="diagram of A">"#);
-        assert!(out.contains("<div class=\"img-fallback\">"));
-        assert!(out.contains("[diagram of A]"));
-        assert!(!out.contains("<img"));
+    fn sanitize_keeps_data_uri_in_alt_fallback() {
+        // The proxy only accepts http(s) sources; everything else
+        // (data:, file:, etc.) falls back to the styled alt-text block
+        // so the article still reads even though the image won't load.
+        let out = sanitize_images(r#"<img src="data:image/webp;base64,xxx" alt="diagram">"#);
+        assert!(out.contains("img-fallback"));
+        assert!(out.contains("[diagram]"));
+        assert!(!out.contains("/img?u="));
     }
 
     #[test]
-    fn sanitize_replaces_avif_with_image_placeholder_when_no_alt() {
-        let out = sanitize_images(r#"<img src="https://x.com/q.avif">"#);
+    fn sanitize_uses_image_placeholder_when_non_http_src_has_no_alt() {
+        let out = sanitize_images(r#"<img src="data:image/png;base64,xxx">"#);
         assert!(out.contains("[image]"));
     }
 
@@ -273,36 +309,30 @@ mod tests {
     #[test]
     fn sanitize_handles_single_quoted_attributes() {
         let out = sanitize_images(r#"<img src='https://x.com/p.png' alt='hi'>"#);
-        assert!(out.contains(r#"src="https://x.com/p.png""#));
+        assert!(out.contains("/img?u=https%3A%2F%2Fx.com%2Fp.png"));
         assert!(out.contains(r#"alt="hi""#));
     }
 
     #[test]
     fn sanitize_escapes_alt_text_in_fallback() {
-        // Raw `&` in attributes is technically tolerated by HTML5.
-        let out = sanitize_images(r#"<img src="https://x.com/q.webp" alt="A & B">"#);
+        let out = sanitize_images(r#"<img src="data:image/webp;base64,xx" alt="A & B">"#);
         assert!(out.contains("[A &amp; B]"));
+    }
+
+    #[test]
+    fn sanitize_escapes_alt_text_in_proxy_rewrite() {
+        // The proxy rewrite uses an attribute encoder for alt; a "
+        // in the source must be encoded to `&quot;` or the attribute
+        // would close early and inject markup.
+        let out = sanitize_images(r#"<img src="https://x.com/p.jpg" alt='quote " here'>"#);
+        assert!(!out.contains(r#"alt="quote " here""#));
+        assert!(out.contains("&quot;"));
     }
 
     #[test]
     fn sanitize_handles_self_closing_tag() {
         let out = sanitize_images(r#"<img src="https://x.com/p.jpg" alt="x" />"#);
-        assert!(out.starts_with("<img"));
-    }
-
-    #[test]
-    fn sanitize_treats_svg_as_unsupported() {
-        let out = sanitize_images(r#"<img src="https://x.com/logo.svg" alt="logo">"#);
-        assert!(out.contains("img-fallback"));
-        assert!(out.contains("[logo]"));
-    }
-
-    #[test]
-    fn sanitize_treats_data_uri_as_unsupported() {
-        // Data URIs vary; treat as unsupported by default since they're
-        // rarely simple-format raster images.
-        let out = sanitize_images(r#"<img src="data:image/webp;base64,xxx" alt="x">"#);
-        assert!(out.contains("img-fallback"));
+        assert!(out.contains("/img?u="));
     }
 
     // ----- non-HTML resource detection (issue #20) ------------------------

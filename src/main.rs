@@ -24,6 +24,7 @@ mod extract;
 mod feed_search;
 mod feeds;
 mod gemini;
+mod img;
 mod jobs;
 mod logging;
 mod opml;

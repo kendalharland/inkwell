@@ -63,6 +63,16 @@ CREATE TABLE IF NOT EXISTS bookmark (
     bookmarked_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS bookmark_bookmarked_at_idx ON bookmark(bookmarked_at);
+
+-- Server-transcoded JPEGs for the /img proxy. Keyed by sha1(url) so
+-- the proxy lookup is O(1) and the index never holds source URLs.
+-- Purge ages these out alongside articles via scheduler.article_ttl_days.
+CREATE TABLE IF NOT EXISTS image_cache (
+    hash TEXT PRIMARY KEY,
+    jpeg BLOB NOT NULL,
+    fetched_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS image_cache_fetched_at_idx ON image_cache(fetched_at);
 ";
 
 /// First-run seed. No-op if the DB already has any groups; otherwise

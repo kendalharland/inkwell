@@ -20,6 +20,7 @@ use crate::{
     extract::{extract_url, sanitize_images, BLOCKED_MARKER},
     feed_search,
     feeds::{collect_entries, ensure_feeds, entry_full_html, is_valid_iid, item_id},
+    img,
     state::AppState,
     view::{now_secs, page, render_entries, url_encode},
 };
@@ -89,6 +90,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/admin/group/add", post(admin_add_group))
         .route("/admin/group/remove", post(admin_remove_group))
         .route("/admin/import-opml", post(admin_import_opml))
+        .route("/img", get(image_proxy))
         .with_state(state)
 }
 
@@ -862,6 +864,88 @@ async fn admin_feed_search(
     Json(feed_search::search_all(&state.discovery_http, &state.feed_search, &q.q).await)
 }
 
+// ---------------------------------------------------------------------------
+// /img — Kindle-optimized image proxy
+//
+// Article HTML is rewritten in `sanitize_images` so every <img> points
+// here. The first hit on a given URL triggers a fetch + transcode (see
+// `crate::img`); subsequent hits are served from the SQLite image
+// cache. On any error — SSRF reject, source 404, undecodable bytes —
+// the proxy returns 404 so the Kindle renders the <img>'s alt text.
+
+#[derive(Deserialize)]
+struct ImgQ {
+    /// Source image URL — must already be percent-encoded by whoever
+    /// built the proxy link (sanitize_images does this).
+    #[serde(default)]
+    u: String,
+}
+
+async fn image_proxy(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ImgQ>,
+) -> axum::response::Response {
+    if q.u.is_empty() {
+        return (StatusCode::BAD_REQUEST, "missing u").into_response();
+    }
+    let hash = img::hash_url(&q.u);
+
+    // Fast path: cache hit.
+    if let Some(bytes) = read_cached_image(&state, &hash).await {
+        return jpeg_response(bytes);
+    }
+
+    // Cache miss: fetch and transcode. Any failure returns 404 so the
+    // browser falls back to the alt text — the article reads through
+    // even when an image source is gone or unsupported.
+    let jpeg = match img::fetch_and_transcode(&state.http, &q.u).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("img proxy: transcode failed for {}: {}", q.u, e);
+            return StatusCode::NOT_FOUND.into_response();
+        }
+    };
+    if let Err(e) = store_cached_image(&state, &hash, &jpeg).await {
+        // Cache-write failure isn't user-visible — we still have the
+        // bytes, so log and serve them.
+        tracing::warn!("img proxy: cache write failed for {}: {}", q.u, e);
+    }
+    jpeg_response(jpeg)
+}
+
+async fn read_cached_image(state: &AppState, hash: &str) -> Option<Vec<u8>> {
+    let conn = state.db.lock().await;
+    conn.query_row(
+        "SELECT jpeg FROM image_cache WHERE hash = ?1",
+        [hash],
+        |r| r.get::<_, Vec<u8>>(0),
+    )
+    .ok()
+}
+
+async fn store_cached_image(state: &AppState, hash: &str, jpeg: &[u8]) -> anyhow::Result<()> {
+    let conn = state.db.lock().await;
+    conn.execute(
+        "INSERT OR REPLACE INTO image_cache (hash, jpeg, fetched_at) VALUES (?1, ?2, ?3)",
+        rusqlite::params![hash, jpeg, now_secs()],
+    )?;
+    Ok(())
+}
+
+fn jpeg_response(bytes: Vec<u8>) -> axum::response::Response {
+    // Cache-Control aggressively — the cache key is sha1(url), so any
+    // change to the URL produces a new key. 30 days mirrors the
+    // default article TTL.
+    (
+        [
+            ("content-type", "image/jpeg"),
+            ("cache-control", "public, max-age=2592000, immutable"),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1475,5 +1559,79 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
         // Group was created (it had outlines) but no feeds landed.
         assert!(state.feeds.read().await.is_empty());
+    }
+
+    // ----- /img proxy tests (issue #21) -----------------------------------
+
+    async fn seed_image_cache(state: &Arc<AppState>, hash: &str, jpeg: &[u8], fetched_at: i64) {
+        let conn = state.db.lock().await;
+        let bytes = jpeg.to_vec();
+        conn.execute(
+            "INSERT INTO image_cache (hash, jpeg, fetched_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![hash, bytes, fetched_at],
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn img_proxy_serves_cached_jpeg() {
+        let state = fresh_app_state();
+        let url = "https://example.com/photo.png";
+        // The "JPEG" payload is arbitrary — the handler returns the
+        // bytes verbatim from the cache, no re-validation.
+        let payload = vec![0xff, 0xd8, 0xff, 0xe0, 0, 16, b'J', b'F', b'I', b'F'];
+        seed_image_cache(&state, &crate::img::hash_url(url), &payload, 1).await;
+
+        let req = get(&format!("/img?u={}", url_encode(url)));
+        let resp = router(state.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("content-type").unwrap(), "image/jpeg");
+        assert!(
+            resp.headers()
+                .get("cache-control")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("max-age="),
+            "long Cache-Control missing"
+        );
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(bytes.as_ref(), payload.as_slice());
+    }
+
+    #[tokio::test]
+    async fn img_proxy_returns_400_when_u_is_missing() {
+        let state = fresh_app_state();
+        let resp = router(state.clone()).oneshot(get("/img")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn img_proxy_returns_400_when_u_is_empty() {
+        let state = fresh_app_state();
+        let resp = router(state.clone()).oneshot(get("/img?u=")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn img_proxy_rejects_non_http_scheme_with_404() {
+        // SSRF guard at the URL-validation layer; the handler should
+        // never reach a network fetch.
+        let state = fresh_app_state();
+        let resp = router(state.clone())
+            .oneshot(get("/img?u=file%3A%2F%2F%2Fetc%2Fpasswd"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn img_proxy_rejects_loopback_host_with_404() {
+        let state = fresh_app_state();
+        let resp = router(state.clone())
+            .oneshot(get("/img?u=http%3A%2F%2F127.0.0.1%2Fphoto.png"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }

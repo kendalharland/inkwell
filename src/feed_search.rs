@@ -151,7 +151,7 @@ async fn safe_fetch_text(
 /// Resolve `host` and bail if any address sits in a range we never
 /// want a server-side discovery fetch to reach. Handles both literal
 /// IPs (no DNS) and hostnames (resolves via the system stub).
-async fn check_host_is_public(host: &str) -> Result<()> {
+pub(crate) async fn check_host_is_public(host: &str) -> Result<()> {
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_disallowed_ip(ip) {
             anyhow::bail!("blocked private/internal IP {}", ip);
