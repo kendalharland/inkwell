@@ -24,6 +24,7 @@ mod extract;
 mod feed_search;
 mod feeds;
 mod gemini;
+mod http_client;
 mod img;
 mod jobs;
 mod logging;
@@ -73,15 +74,20 @@ async fn main() -> Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(15);
+    // Send a browser-shaped User-Agent and the Accept/Accept-Language
+    // headers a real browser would attach, so sites with aggressive
+    // bot-detection (#24) serve us HTML instead of a 4XX.
     let http = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; inkwell-rss-reader/0.1)")
+        .user_agent(http_client::BROWSER_UA)
+        .default_headers(http_client::default_headers())
         .timeout(Duration::from_secs(timeout_secs))
         .build()?;
     // Used only by the feed-discovery autocomplete (#15). Redirects
     // are followed manually in `feed_search` so each hop's host can
     // be re-checked against the SSRF block-list.
     let discovery_http = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; inkwell-rss-reader/0.1)")
+        .user_agent(http_client::BROWSER_UA)
+        .default_headers(http_client::default_headers())
         .timeout(Duration::from_secs(timeout_secs))
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
