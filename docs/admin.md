@@ -80,10 +80,36 @@ into the database with the following rules:
   imported.
 
 After import, a flash message at the top of the admin page reports
-how many feeds were added, how many new groups were created, and how
-many entries were skipped as duplicates or as invalid URLs.
+the result in the form:
+
+```
+Imported 47 feed(s) into 3 new group(s); 2 duplicate(s), 1 invalid skipped.
+```
+
+The four counts correspond to the merge rules above:
+
+- **Imported** — feeds that were added to the database.
+- **New groups** — groups that didn't exist in inkwell before this
+  import and were created automatically.
+- **Duplicates** — feed URLs already subscribed in their target group;
+  the import skipped them rather than adding a second row.
+- **Invalid** — `<outline xmlUrl>` entries that failed the scheme
+  allow-list (typically `javascript:`, `file:`, or `mailto:`).
 
 The uploaded file is capped at 1 MiB.
+
+### Importing from common readers
+
+The OPML export menus vary by source:
+
+- **NetNewsWire**: File → Export Subscriptions → OPML.
+- **Feedly**: Settings → OPML → Export your Feedly OPML.
+- **Inoreader**: Preferences → Folders and tags → Export → OPML.
+- **FreshRSS**: ⚙ → Subscription management → Export.
+- **Miniflux**: Settings → Export.
+- **Tiny Tiny RSS**: Preferences → Feeds → OPML → Export.
+
+The resulting `.opml` file imports into inkwell without modification.
 
 ## Restricting access
 

@@ -69,6 +69,22 @@ The image cache ages out alongside articles — entries older than
 `scheduler.article_ttl_days` are dropped by the same purge job that
 removes stale articles.
 
+### When extraction fails
+
+Some sites refuse to serve their HTML to anything they identify as a
+non-browser request (paywalls, JavaScript challenges, residual
+bot-detection). inkwell sends a recent Chrome User-Agent and the same
+`Accept` and `Accept-Language` headers a real browser would, which
+clears most heuristics. Sites layered behind a JS challenge or an IP-
+or TLS-fingerprint gate still return 4XX.
+
+When that happens, the article page renders a short notice in place
+of the article body and a direct link to the original URL. Tapping
+the link opens the article in the Kindle's built-in browser, which
+performs a fresh request from the device's IP and often succeeds
+where the server-side extractor doesn't. Failed extractions are not
+cached; tapping the same article later retries from scratch.
+
 ### Non-HTML articles
 
 When a feed entry points to a non-HTML resource — a PDF, an image, a
@@ -96,6 +112,17 @@ cache no longer holds a copy.
 Bookmarked articles are never deleted by the purge job. Removing the
 bookmark (tapping the filled bookmark icon) makes the article eligible
 for purge again on the next sweep.
+
+### Toggling without losing your place
+
+Tapping the bookmark icon submits a form that round-trips to the
+server and reloads the listing. To keep the page from snapping back to
+the top after every toggle, inkwell redirects to the same URL with a
+`#item-{id}` fragment appended, and every row in the listing carries a
+matching anchor id. The browser scrolls back to the row that was
+toggled, so a long page reads naturally even when many bookmarks are
+flipped in a row. No JavaScript is involved — the redirect-and-anchor
+trick works identically on every Kindle generation.
 
 ## Density and theme
 
