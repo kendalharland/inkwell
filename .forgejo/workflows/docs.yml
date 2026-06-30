@@ -1,0 +1,64 @@
+name: docs
+
+# Rebuild the book on every push to main that touches the docs source
+# or the mdbook config, and force-publish the result to the `pages`
+# branch (which is what Codeberg Pages actually serves). Without this,
+# every docs edit lands on main but stays invisible at
+# https://kendal.codeberg.page/inkwell/ until someone manually
+# rebuilds and pushes the `pages` branch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'theme/**'
+      - 'book.toml'
+      - '.forgejo/workflows/docs.yml'
+
+jobs:
+  publish:
+    runs-on: codeberg-medium
+    permissions:
+      contents: write
+    env:
+      MDBOOK_VERSION: '0.4.52'
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install mdbook
+        run: |
+          set -euo pipefail
+          curl -fL \
+            "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz
+          mkdir -p "$HOME/.local/bin"
+          mv mdbook "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build book
+        run: mdbook build
+
+      - name: Publish to pages branch
+        env:
+          # The default per-job token is scoped to this repo and good
+          # for `contents: write`, which is all we need.
+          TOKEN: ${{ github.token }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(git rev-parse --short HEAD)"
+          cd book
+          git init -q
+          git config user.name "Codeberg CI"
+          git config user.email "ci@codeberg.org"
+          git checkout -q -b pages
+          git add -A
+          git commit -q -m "Rebuild from main@${SOURCE_SHA}"
+          # Force-push: pages branch is regenerated from scratch each
+          # time, so there's no history worth preserving on it.
+          git push -q --force \
+            "https://x-access-token:${TOKEN}@${REPO_URL#https://}" \
+            pages
