@@ -76,7 +76,7 @@ with HTTP Basic auth in nginx or Caddy, or via an external identity
 provider such as authelia or Authentik.
 
 For pairing new devices without typing a password, see the
-[`inkwell-pair`](../pair/README.md) sidecar.
+[pairing sidecar](sidecar.md).
 
 ## Backups
 

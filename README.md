@@ -1,107 +1,91 @@
 # inkwell
 
-A small self-hosted RSS/Atom reader that serves articles as plain HTML
-suited to the **built-in browser on a Kindle** (or any other e-ink
-device with a basic web view). Background jobs pre-extract every
-article so taps render in a few milliseconds.
+A small self-hosted RSS/Atom reader for the built-in browser on a
+Kindle, packaged as a single Rust binary with an optional pairing
+sidecar.
+
+**User-facing documentation lives in the book:
+<https://kendal.codeberg.page/inkwell/>**. Installation, configuration,
+the admin UI, OPML import, the pairing sidecar, and every environment
+variable are documented there. The rest of this file is for working on
+the codebase.
+
+## Workspace layout
 
 ```
-┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│  RSS / Atom URLs │ →  │  inkwell server  │ →  │  Kindle browser  │
-│  (config.yaml)   │    │  HTTP, port 5050 │    │  http://host:5050│
-└──────────────────┘    └──────────────────┘    └──────────────────┘
+.
+├── Cargo.toml            # workspace root + main crate (inkwell)
+├── src/                  # main reader binary
+├── pair/                 # inkwell-pair sidecar workspace member
+├── docs/                 # mdbook source (published to Codeberg Pages)
+├── book.toml             # mdbook config
+├── Dockerfile            # main reader image
+├── config.example.yaml   # seed config
+└── config.docker.yaml    # baked into the image; overridden via volume mount
 ```
 
-## Why
+The main crate and `pair/` share `Cargo.lock`. Docker builds for both
+images use the repo root as the build context (`pair/Dockerfile` is
+selected with `-f`).
 
-Reading on a Kindle is great. Reading *the modern web* on a Kindle is
-not — heavy JavaScript, paywall walls, slow loads, broken layouts.
-inkwell sits between your RSS feeds and your e-reader and serves a
-single, predictable HTML shape that every Kindle browser can render.
-
-## Documentation
-
-Full docs live under [`docs/`](docs/index.md):
-
-- [Installation](docs/installation.md) — source build and Docker.
-- [Self-hosting](docs/self-hosting.md) — reverse proxy, TLS,
-  persistence, backups.
-- [Configuration reference](docs/configuration.md) — every YAML
-  field and environment variable.
-
-## Companion service: `inkwell-pair`
-
-Optional sidecar that mints 6-digit pairing codes and sets a session
-cookie on the device that redeems one — designed for "log in this
-new Kindle without typing a password on it" flows when sitting behind
-authelia or a similar gateway. See [`pair/README.md`](pair/README.md)
-for the env-var surface and the Docker recipe.
-
-## Quick start
-
-The fastest path is Docker:
+## Build
 
 ```sh
-docker build -t inkwell:latest .
-docker run --rm -p 8080:8080 \
-  -v "$PWD/config.yaml:/app/config.yaml:ro" \
-  -v inkwell-data:/data \
-  inkwell:latest
+cargo build --release                # both members of the workspace
+cargo build --release -p inkwell     # main binary only
+cargo build --release -p inkwell-pair
 ```
 
-Or build from source (Rust 1.80+) and run the binary directly:
+The main binary lands at `target/release/inkwell`. It takes a single
+positional argument — the path to a YAML config (see
+`config.example.yaml`).
+
+## Run locally
 
 ```sh
-git clone https://codeberg.org/kendal/inkwell.git
-cd inkwell
-cargo build --release
 cp config.example.yaml config.yaml   # edit before running
-./target/release/inkwell config.yaml
+cargo run --release -- config.yaml
 ```
 
-The server listens on `0.0.0.0:5050` from source or `:8080` in the
-Docker image. From your Kindle, browse to `http://<host>:<port>/`.
+Listens on `0.0.0.0:5050` by default; override with `PORT`. The cache
+DB lands at `./reader_cache.sqlite`; override with `CACHE_DB`.
 
-## Configuration at a glance
+## Test
 
-```yaml
-rss:
-  groups:
-    - name: "Hobbies & tech"
-      feeds:
-        - https://news.ycombinator.com/rss
-        - https://lobste.rs/rss
-    - name: "Top stories"
-      feeds:
-        - https://feeds.bbci.co.uk/news/world/rss.xml
-
-# Optional. Without this block the server runs as a foreground reader.
-scheduler:
-  refresh: "@every 10m"      # cron or "@every Ns"
-  purge: "0 3 * * *"         # 5-field cron, also accepts 6-field with leading seconds
-  article_ttl_days: 30
-
-# Optional. UI density.
-view:
-  compact_default: false
+```sh
+cargo test --workspace               # both crates
+cargo test --bin inkwell             # main reader unit + integration
+cargo test -p inkwell-pair           # sidecar
 ```
 
-The `rss:` block is read once on first start to seed the SQLite store;
-after that, edit feeds and groups via the `/admin` page. The full
-schema — including the `gemini:` and `feed_search:` blocks and every
-environment variable — lives in
-[`docs/configuration.md`](docs/configuration.md).
+The test suite hits real `tokio::net::TcpListener`s for the
+header-on-the-wire and pair flow tests, so the host must have loopback
+networking available.
 
-## Connect from your usual RSS reader
+Formatting:
 
-inkwell consumes RSS — it does not currently re-expose RSS for other
-readers. Any standalone reader (NetNewsWire, Reeder, FreshRSS, etc.)
-can subscribe to the **same source URLs** you put in `config.yaml`.
+```sh
+cargo fmt --all -- --check
+```
 
-If you'd like inkwell to also serve outbound feeds, weigh in on an
-issue.
+CI on Codeberg runs `cargo fmt --check` and `cargo test --workspace`
+on every push to `main`; see `.forgejo/workflows/ci.yml`.
+
+## Docs
+
+The docs site is an mdbook in `docs/`. Build locally with:
+
+```sh
+mdbook build      # outputs to ./book (gitignored)
+mdbook serve      # local preview at http://localhost:3000
+```
+
+Codeberg Pages publishes the built site automatically from `main`.
+
+When changing user-visible behavior, update the matching page in
+`docs/` in the same commit — the docs site is treated as part of the
+feature surface, not a follow-up.
 
 ## License
 
-MIT or Apache-2.0 — at your option. Files do not yet carry license
-headers; see [LICENSE](LICENSE) once added.
+MIT or Apache-2.0 — at your option. See [LICENSE](LICENSE).
