@@ -11,18 +11,24 @@ jobs:
     steps:
       - uses: https://github.com/actions/checkout@v4
 
-      - uses: https://github.com/actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rustfmt
+      # Install Rust via rustup directly rather than through a
+      # third-party GitHub action. The setup-rust-toolchain action
+      # doesn't reliably resolve on Forgejo runners; every run using
+      # it failed within ~90s, before any cargo step even started.
+      - name: Install Rust
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --default-toolchain stable --profile minimal --component rustfmt
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      - uses: https://github.com/Swatinem/rust-cache@v2
+      - run: rustc --version && cargo --version
 
       - run: cargo fmt --all -- --check
 
       # Compile and run are split so each gets its own 10-min runner
-      # budget. The combined cold build (with image / quick-xml / axum
-      # and friends) brushes up against the per-step limit, and once
-      # one run completes the Swatinem rust-cache step above keeps
-      # subsequent runs fast.
+      # budget. Cold cargo builds of this workspace (with image,
+      # quick-xml, axum, and friends) brush up against the per-step
+      # limit.
       - run: cargo test --workspace --locked --no-run
       - run: cargo test --workspace --locked
