@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-#
 # Single-binary inkwell image. Multi-stage; the runtime image carries
 # only the binary plus ca-certificates (needed for outbound HTTPS to
 # feed sources). SQLite is statically linked via rusqlite's `bundled`
@@ -23,14 +21,12 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY pair ./pair
 
-# BuildKit cache mounts so iterative rebuilds reuse the cargo registry
-# and the target directory. The binary is copied out to a stable path
-# so the next stage doesn't need to know about /src/target.
 # -p inkwell scopes the build to the server binary; the pair sidecar
-# ships as its own image and isn't needed here.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p inkwell && \
+# ships as its own image and isn't needed here. Cache mounts are
+# intentionally not used — CI builds fresh anyway, and dropping the
+# BuildKit-specific `--mount=type=cache` syntax lets non-BuildKit
+# builders (Kaniko on the CI runner) reuse this Dockerfile as-is.
+RUN cargo build --release --locked -p inkwell && \
     cp /src/target/release/inkwell /tmp/inkwell
 
 # ---- runtime ---------------------------------------------------------------
