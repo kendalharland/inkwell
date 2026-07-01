@@ -1,6 +1,25 @@
 # Installation
 
-inkwell can be built from source or run as a Docker container.
+inkwell ships as a single Rust binary and a Docker image built from
+the same source. Pick whichever fits the target host.
+
+## Docker
+
+Requires a working Docker daemon.
+
+```sh
+docker build -t inkwell:latest .
+docker run --rm -p 8080:8080 \
+  -v "$PWD/config.yaml:/app/config.yaml:ro" \
+  -v inkwell-data:/data \
+  inkwell:latest
+```
+
+The image listens on port 8080 and stores the SQLite cache (plus, if
+enabled, the Gemini TLS material) in `/data`. Mount a named volume
+there to persist state across container recreation. The bundled
+config is baked in at `/app/config.yaml`; the `-v` above overrides it
+with a config on the host.
 
 ## From source
 
@@ -12,45 +31,50 @@ cd inkwell
 cargo build --release
 ```
 
-The binary is written to `./target/release/inkwell`. Copy the example
-config, edit it, and pass its path to the binary:
+The binary is written to `./target/release/inkwell`. It takes a
+single positional argument — the path to a YAML config file.
 
 ```sh
 cp config.example.yaml config.yaml
-# add your feeds in config.yaml
 ./target/release/inkwell config.yaml
 ```
 
-The server listens on `0.0.0.0:5050` by default and is reachable from
-any device on the same network at `http://<host>:5050/`.
+Expected output:
 
-No system libraries are required at runtime. On a Debian or Ubuntu
-build host, `pkg-config` and `ca-certificates` are required for the
-build; both are installed by the shipped `Dockerfile`.
-
-## Docker
-
-```sh
-docker build -t inkwell:latest .
-docker run --rm -p 8080:8080 \
-  -v inkwell-data:/data \
-  inkwell:latest
+```
+INFO scheduler armed — refresh: '@every 10m', purge: '0 3 * * *', article_ttl_days: 30
+INFO listening on http://0.0.0.0:5050
 ```
 
-The image listens on port 8080 and stores its SQLite cache (plus any
-Gemini cert and key) in `/data`, which is exposed as a named volume.
-Articles, bookmarks, and admin-edited feed lists persist across
-container recreation.
+On a Debian or Ubuntu build host, `pkg-config` and `ca-certificates`
+are required at build time; both are installed automatically by the
+shipped `Dockerfile`. No system libraries are required at runtime.
 
-To override the bundled config, mount one read-only at
-`/app/config.yaml`:
+## First configuration
 
-```sh
-docker run --rm -p 8080:8080 \
-  -v "$PWD/config.yaml:/app/config.yaml:ro" \
-  -v inkwell-data:/data \
-  inkwell:latest
+Any usable config file needs at least an `rss:` block listing one or
+more feeds. The shipped `config.example.yaml` covers the common
+shape:
+
+```yaml
+rss:
+  groups:
+    - name: "Tech"
+      feeds:
+        - https://lobste.rs/rss
+        - https://news.ycombinator.com/rss
 ```
 
-See [self-hosting](self-hosting.md) for reverse-proxy, backup, and
-upgrade procedures.
+That block is read only on the first launch to seed the SQLite
+database. Once feeds and groups have been edited through the
+[`/admin` page](admin.md), the database is the source of truth and
+the config's `rss:` section is effectively read-only documentation.
+
+For every other field, see the [configuration
+reference](configuration.md).
+
+## Next
+
+- [Self-hosting](self-hosting.md) — running inkwell behind a reverse
+  proxy, with backups and upgrades.
+- [Reading](reading.md) — what the Kindle-facing UI looks like.

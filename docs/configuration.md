@@ -1,10 +1,10 @@
 # Configuration reference
 
-inkwell reads a single YAML file at startup; pass its path as the
-only argument. A small set of runtime knobs are configured via
-environment variables instead.
+inkwell reads a single YAML file at startup, passed as the only
+positional argument. Runtime knobs — port, cache path, HTTP timeout,
+log filter — come from environment variables.
 
-A complete config has five top-level blocks; only `rss` is required:
+A complete config has five top-level blocks. Only `rss:` is required:
 
 ```yaml
 rss: …          # required
@@ -14,10 +14,32 @@ gemini: …       # optional
 feed_search: …  # optional, defaults to link_auto_discovery
 ```
 
+## Fields at a glance
+
+| Path                            | Required | Default                       |
+| ------------------------------- | -------- | ----------------------------- |
+| `rss.groups[].name`             | yes      |                               |
+| `rss.groups[].feeds`            | yes      |                               |
+| `scheduler.refresh`             | no       |                               |
+| `scheduler.purge`               | no       |                               |
+| `scheduler.article_ttl_days`    | no       | `30`                          |
+| `scheduler.log_file`            | no       | `./inkwell.log`               |
+| `view.compact_default`          | no       | `false`                       |
+| `view.dark_default`             | no       | `false`                       |
+| `gemini.bind`                   | if block | `0.0.0.0:1965`                |
+| `gemini.cert_pem`               | if block |                               |
+| `gemini.key_pem`                | if block |                               |
+| `gemini.hostnames`              | if block |                               |
+| `feed_search.providers`         | no       | `[{kind: link_auto_discovery}]` |
+
+Environment variables: [`PORT`](#port), [`CACHE_DB`](#cache_db),
+[`FEED_TTL`](#feed_ttl), [`HTTP_TIMEOUT`](#http_timeout),
+[`RUST_LOG`](#rust_log).
+
 ## `rss` (required)
 
-The seed feed list. Read once on first startup to populate the SQLite
-store; after that, edit feeds and groups via the `/admin` page.
+The seed feed list. Read once on the first startup to populate the
+SQLite store; after that, edit feeds and groups via [`/admin`](admin.md).
 
 ```yaml
 rss:
@@ -35,25 +57,15 @@ rss:
 
 Label shown in the Groups view.
 
-```yaml
-- name: "Hobbies & tech"
-```
-
 ### `rss.groups[].feeds`
 
-Feed URLs. A URL listed in multiple groups still resolves to one cache
-row, so subscribing the same feed from two groups is free.
-
-```yaml
-feeds:
-  - https://news.ycombinator.com/rss
-  - https://lobste.rs/rss
-```
+Feed URLs. A URL listed in multiple groups still resolves to one
+cache row.
 
 ## `scheduler` (optional)
 
-Background jobs. Without this block, inkwell runs as a foreground
-reader — no refresh, no purge, articles are only fetched on demand.
+Background jobs. Without this block, feeds refresh only on demand
+and articles are never purged.
 
 ```yaml
 scheduler:
@@ -65,47 +77,28 @@ scheduler:
 
 ### `scheduler.refresh`
 
-How often to fetch every feed and pre-extract any new articles into
-the cache. Accepts 5-field cron (`min hr dom mon dow`), 6-field with
+How often to fetch every feed and pre-extract new articles into the
+cache. Accepts 5-field cron (`min hr dom mon dow`), 6-field with
 leading seconds, or `@every <duration>`.
-
-```yaml
-refresh: "@every 10m"
-```
 
 ### `scheduler.purge`
 
-How often to sweep old articles out of the cache. Same format as
-`refresh`. Bookmarked articles are exempt — the purge job won't touch
-anything in the read-later list.
-
-```yaml
-purge: "0 3 * * *"   # 03:00 daily
-```
+How often to sweep old articles and cached images out of the cache.
+Same format as `refresh`. Bookmarked articles are exempt.
 
 ### `scheduler.article_ttl_days`
 
 Maximum age (in days) an article stays in the cache before the purge
-job is allowed to delete it.
-
-```yaml
-article_ttl_days: 30
-```
+job may delete it. Default `30`.
 
 ### `scheduler.log_file`
 
-Path to the rolling log file used by the scheduler and workers.
-Defaults to `./inkwell.log` if omitted.
-
-```yaml
-log_file: /data/inkwell.log
-```
+Path to the rolling log file. Default `./inkwell.log`.
 
 ## `view` (optional)
 
-Default UI preferences shown to a brand-new visitor. Both can be
-flipped per-session via the **Density** and **Theme** links in the
-top nav.
+Default UI preferences for a new visitor. Both are also togglable
+per-session via the top nav.
 
 ```yaml
 view:
@@ -115,25 +108,17 @@ view:
 
 ### `view.compact_default`
 
-If `true`, the compact density layout is the initial state.
-
-```yaml
-compact_default: true
-```
+If `true`, compact density is the initial state.
 
 ### `view.dark_default`
 
 If `true`, dark theme is the initial state.
 
-```yaml
-dark_default: true
-```
-
 ## `gemini` (optional)
 
-When present, inkwell starts a parallel Gemini server serving the same
-listings and articles as gemtext over TLS. The cert and key are
-generated on first launch if the files don't exist; Gemini clients
+When present, inkwell starts a parallel Gemini server serving the
+same listings and articles as gemtext over TLS. The cert and key are
+generated on first launch if the files don't exist. Gemini clients
 TOFU-pin certs, so keep them stable across restarts.
 
 ```yaml
@@ -150,42 +135,23 @@ gemini:
 
 `host:port` to listen on. Gemini's default port is 1965.
 
-```yaml
-bind: "0.0.0.0:1965"
-```
-
 ### `gemini.cert_pem`
 
 Path to the TLS certificate. Generated on first launch if missing.
 
-```yaml
-cert_pem: /data/gemini.cert.pem
-```
-
 ### `gemini.key_pem`
 
 Path to the TLS private key. Generated alongside the cert.
-
-```yaml
-key_pem: /data/gemini.key.pem
-```
 
 ### `gemini.hostnames`
 
 Subject Alternative Names baked into a freshly generated certificate.
 List every hostname clients might use to reach the server.
 
-```yaml
-hostnames:
-  - localhost
-  - inkwell.example.com
-```
-
 ## `feed_search` (optional)
 
-Controls the autocomplete on the admin UI's *Add feed* inputs. The
-default ships with the built-in autodiscovery provider; extra
-providers can be listed alongside.
+Providers powering the autocomplete on the admin UI's *Add feed*
+inputs.
 
 ```yaml
 feed_search:
@@ -193,70 +159,44 @@ feed_search:
     - kind: link_auto_discovery
 ```
 
-SSRF defense: every hop's host is resolved and rejected if it sits in
-a private/loopback/link-local range. Redirects are followed manually
-so a public→internal redirect can't smuggle past the check.
+Every hop's host is resolved and rejected if it sits in a
+private/loopback/link-local range. Redirects are followed manually so
+a public→internal redirect can't smuggle past the check.
 
 ### `link_auto_discovery`
 
-Built-in provider. GETs the user's URL and scrapes `<link
+Built-in provider. Fetches the user's URL and scrapes `<link
 rel="alternate">` tags advertising RSS / Atom / JSON-feed payloads.
-The recommended default.
-
-```yaml
-- kind: link_auto_discovery
-```
+The default, and the recommended one.
 
 ### `feedsearch`
 
 feedsearch.dev passthrough. Currently fronted by a Cloudflare
-challenge that blocks server-side requests; off by default, kept
-for environments that can reach it.
-
-```yaml
-- kind: feedsearch
-```
+challenge that blocks server-side requests; off by default, kept for
+environments that can reach it.
 
 ## Environment variables
-
-Runtime knobs read from the process environment.
 
 ### `PORT`
 
 HTTP listen port. Default `5050` from source builds, `8080` in the
 Docker image.
 
-```sh
-PORT=8080
-```
-
 ### `CACHE_DB`
 
-Path to the SQLite cache file. Defaults to `./reader_cache.sqlite`;
-the Docker image overrides this to `/data/reader_cache.sqlite` so the
-cache persists in the named volume.
-
-```sh
-CACHE_DB=/data/reader_cache.sqlite
-```
+Path to the SQLite cache file. Default `./reader_cache.sqlite`; the
+Docker image overrides this to `/data/reader_cache.sqlite` so the
+cache persists in the mounted volume.
 
 ### `FEED_TTL`
 
 Per-feed in-memory cache TTL in seconds. Lower = more refetches,
 higher = staler reads. Default `600`.
 
-```sh
-FEED_TTL=600
-```
-
 ### `HTTP_TIMEOUT`
 
 Outbound HTTP request timeout in seconds, covering both feed fetches
 and article extraction. Default `15`.
-
-```sh
-HTTP_TIMEOUT=15
-```
 
 ### `RUST_LOG`
 

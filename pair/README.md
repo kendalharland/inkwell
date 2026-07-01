@@ -4,8 +4,8 @@ Standalone HTTP sidecar that mints one-time pairing codes for the
 inkwell reader. Workspace member of the parent crate at the repo
 root.
 
-User-facing documentation — flow, configuration, Docker recipe,
-pairing with authelia — lives in the book:
+User docs — flow, configuration, Docker recipe, reverse-proxy setup,
+authelia integration — live at
 <https://kendal.codeberg.page/inkwell/sidecar.html>.
 
 ## Build

@@ -1,23 +1,22 @@
 # inkwell
 
-A small self-hosted RSS/Atom reader designed for the built-in browser
-on a Kindle (or any other low-power e-ink device). inkwell
-pre-extracts every article so taps render in a few hundred
-milliseconds, transcodes every embedded image to a Kindle-friendly
-JPEG, and optionally serves the same content over the Gemini protocol.
+inkwell is a self-hosted RSS/Atom reader that serves articles as
+static HTML tuned for the built-in browser on a Kindle. Background
+jobs pre-extract every article and transcode every embedded image, so
+a tap on the device fetches ready-to-render bytes from local disk.
 
 ![inkwell home screen on a Kindle](img/home.png)
 
-## Get started
+## Documentation
 
-- [Installation](installation.md) — getting a build running, either
-  from source or Docker.
-- [Self-hosting](self-hosting.md) — docker-compose recipe, reverse
-  proxy, backups.
-- [Reading](reading.md) — listings, density, theme, bookmarks, the
-  article view.
-- [Admin](admin.md) — managing groups and feeds, OPML import.
-- [Authenticating your e-reader](sidecar.md) — sign a new Kindle
-  into the auth gateway without typing a password on the device.
+- [Installation](installation.md) — build from source, run under
+  Docker, first configuration.
+- [Self-hosting](self-hosting.md) — docker-compose, reverse proxy,
+  admin access control, backups, upgrades.
+- [Reading](reading.md) — the listing, article, and read-later views,
+  and their behaviour on a Kindle.
+- [Admin](admin.md) — add and remove feeds and groups, import OPML.
+- [Authenticating your e-reader](sidecar.md) — sign a new Kindle in
+  through the auth gateway without typing on the device.
 - [Configuration reference](configuration.md) — every YAML field and
-  environment variable, with examples.
+  environment variable, with defaults.

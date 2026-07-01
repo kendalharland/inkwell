@@ -1,17 +1,15 @@
 # Self-hosting
 
-inkwell is designed to run as a long-lived service on a home server,
-VPS, or any other Docker host.
+Recipes for running inkwell as a long-lived service — docker-compose,
+a reverse proxy for TLS, admin access control, backups, and upgrades.
 
 ## docker-compose
-
-Put the following in a `docker-compose.yml`:
 
 ```yaml
 services:
   inkwell:
     image: inkwell:latest
-    build: .                # or pull from a registry once published
+    build: .
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -23,22 +21,20 @@ volumes:
   inkwell-data:
 ```
 
-Place `config.yaml` next to it (start from `config.example.yaml`),
-then start the stack:
+Place `config.yaml` next to the compose file (start from
+`config.example.yaml`), then:
 
 ```sh
 docker compose up -d
 ```
 
-The server is then reachable at `http://<host>:8080/`. The
-`inkwell-data` named volume holds the article cache, bookmarks, and
+The reader is reachable at `http://<host>:8080/`. The `inkwell-data`
+volume holds the article cache, image cache, bookmarks, and
 admin-edited feed list, and persists across container recreation.
 
-## Behind a reverse proxy
+## Reverse proxy
 
-To serve inkwell over HTTPS, place a reverse proxy in front of it.
-Configuration snippets for two common proxies follow; adapt them for
-whichever proxy is in use.
+To serve over HTTPS, place a reverse proxy in front of the container.
 
 ### Caddy
 
@@ -68,20 +64,20 @@ server {
 }
 ```
 
-## Restricting access to the admin page
+## Admin access control
 
-The `/admin` route is unauthenticated. When inkwell is exposed to the
-public internet, gate `/admin/*` at the reverse proxy — for example
-with HTTP Basic auth in nginx or Caddy, or via an external identity
+The `/admin` route is unauthenticated. When the reader is exposed
+beyond a trusted network, gate `/admin/*` at the reverse proxy — HTTP
+Basic auth in nginx or Caddy is enough, or use an external identity
 provider such as authelia or Authentik.
 
-For pairing new devices without typing a password, see the
+To sign a new Kindle in without typing a password on the device, see
 [authenticating your e-reader](sidecar.md).
 
 ## Backups
 
-All persistent state is stored in the `inkwell-data` volume. Back it
-up with a periodic SQLite `.backup` to a path inside the volume, then
+All persistent state lives in the `inkwell-data` volume. Back it up
+with a periodic SQLite `.backup` to a path inside the volume, then
 copy the resulting file off-host:
 
 ```sh
@@ -96,4 +92,4 @@ docker compose pull   # or: docker compose build --pull
 docker compose up -d
 ```
 
-Schema migrations run automatically on startup.
+Schema migrations run on startup.
