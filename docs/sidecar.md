@@ -118,7 +118,151 @@ The pairing flow then becomes `pair.example.com/generate-token`
 `pair.example.com/token/<code>` on the new device, which sets the
 cookie and redirects to the reader service.
 
-## Pairing with authelia
+## Reverse proxy setup
+
+The pairing flow only works when the reverse proxy in front of both
+services is configured with a specific split:
+
+- **The reader host** (`inkwell.example.com`) requires the auth
+  gateway's session cookie on every request. Requests without it are
+  bounced to the login page. Once the sidecar sets the cookie, the
+  proxy sees it and forwards the request straight to the reader.
+- **The sidecar host** (`pair.example.com`) is split. The mint route
+  `/generate-token` is gated behind the auth gateway — only an
+  operator with a browser session should be able to generate codes.
+  The redemption route `/token/<code>` bypasses the auth check
+  entirely; it's the entry point for a device that doesn't yet have
+  a session, and gating it would make the flow uncrackable.
+
+Three reverse-proxy examples follow. Each assumes authelia is the
+auth gateway on `auth.example.com` (port 9091 locally), the reader
+is on `127.0.0.1:8080`, and the sidecar is on `127.0.0.1:3000`.
+
+### Caddy
+
+```caddyfile
+inkwell.example.com {
+    forward_auth 127.0.0.1:9091 {
+        uri /api/authz/forward-auth
+        copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+    }
+    reverse_proxy 127.0.0.1:8080
+}
+
+pair.example.com {
+    # Redemption route: no forward_auth. New device, no session yet.
+    @redeem path_regexp ^/token/[0-9]{6}$
+    handle @redeem {
+        reverse_proxy 127.0.0.1:3000
+    }
+    # Everything else on this host (in practice /generate-token) is
+    # gated behind the auth gateway.
+    handle {
+        forward_auth 127.0.0.1:9091 {
+            uri /api/authz/forward-auth
+            copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+        }
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+```
+
+### nginx
+
+```nginx
+# Shared authelia sub-request endpoint. Referenced by both server
+# blocks below via `auth_request /internal/authelia`.
+upstream authelia { server 127.0.0.1:9091; }
+
+server {
+    listen 443 ssl http2;
+    server_name inkwell.example.com;
+
+    auth_request /internal/authelia;
+    error_page 401 =302 https://auth.example.com/?rd=$scheme://$http_host$request_uri;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location = /internal/authelia {
+        internal;
+        proxy_pass http://authelia/api/verify;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name pair.example.com;
+
+    # Redemption bypass — matched first because the regex location
+    # takes precedence over the prefix location below.
+    location ~ ^/token/[0-9]{6}$ {
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location / {
+        auth_request /internal/authelia;
+        error_page 401 =302 https://auth.example.com/?rd=$scheme://$http_host$request_uri;
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location = /internal/authelia {
+        internal;
+        proxy_pass http://authelia/api/verify;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+    }
+}
+```
+
+### Traefik
+
+For a docker-compose stack, apply labels to each service and define
+the `authelia` middleware once on the authelia container:
+
+```yaml
+services:
+  authelia:
+    labels:
+      - "traefik.http.middlewares.authelia.forwardauth.address=http://authelia:9091/api/authz/forward-auth"
+      - "traefik.http.middlewares.authelia.forwardauth.trustForwardHeader=true"
+      - "traefik.http.middlewares.authelia.forwardauth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Name,Remote-Email"
+
+  inkwell:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.inkwell.rule=Host(`inkwell.example.com`)"
+      - "traefik.http.routers.inkwell.middlewares=authelia@docker"
+      - "traefik.http.routers.inkwell.tls=true"
+      - "traefik.http.services.inkwell.loadbalancer.server.port=8080"
+
+  inkwell-pair:
+    labels:
+      - "traefik.enable=true"
+      # Higher priority: matched first. Redemption bypasses authelia.
+      - "traefik.http.routers.pair-redeem.rule=Host(`pair.example.com`) && PathRegexp(`^/token/[0-9]{6}$`)"
+      - "traefik.http.routers.pair-redeem.priority=100"
+      - "traefik.http.routers.pair-redeem.tls=true"
+      - "traefik.http.routers.pair-redeem.service=pair"
+      # Everything else on pair.example.com goes through authelia.
+      - "traefik.http.routers.pair-mint.rule=Host(`pair.example.com`)"
+      - "traefik.http.routers.pair-mint.middlewares=authelia@docker"
+      - "traefik.http.routers.pair-mint.tls=true"
+      - "traefik.http.routers.pair-mint.service=pair"
+      - "traefik.http.services.pair.loadbalancer.server.port=3000"
+```
+
+The `pair-redeem` router carries an explicit `priority=100` so it
+wins over `pair-mint` when both rules match the same request.
+
+## Authelia access control
 
 A typical deployment with authelia in front:
 
