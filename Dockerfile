@@ -6,7 +6,7 @@
 
 # ---- builder ---------------------------------------------------------------
 
-FROM rust:1-slim-bookworm AS builder
+FROM docker.io/library/rust:1-slim-bookworm AS builder
 
 # pkg-config is referenced by some transitive build scripts.
 # ca-certificates lets `cargo fetch` reach crates.io.
@@ -31,7 +31,7 @@ RUN cargo build --release --locked -p inkwell && \
 
 # ---- runtime ---------------------------------------------------------------
 
-FROM debian:bookworm-slim AS runtime
+FROM docker.io/library/debian:bookworm-slim AS runtime
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
