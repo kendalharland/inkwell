@@ -13,6 +13,12 @@ jobs:
     env:
       REGISTRY: codeberg.org
       IMAGE: codeberg.org/kendal/inkwell
+      # `vfs` is slower than `overlay` but works on any filesystem,
+      # including the overlayfs the CI container itself runs on. The
+      # overlay driver requires fuse-overlayfs, which isn't installed
+      # on Codeberg's shared runners.
+      STORAGE_DRIVER: vfs
+      BUILDAH_ISOLATION: chroot
     steps:
       - uses: https://github.com/actions/checkout@v4
 
@@ -40,14 +46,14 @@ jobs:
           echo "===== build ====="
           SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
           buildah build \
-            --isolation=chroot \
+            --storage-driver "$STORAGE_DRIVER" \
             -t "$IMAGE:latest" \
             -t "$IMAGE:$SHORT_SHA" \
             .
 
           echo "===== push ====="
-          buildah push "$IMAGE:latest"
-          buildah push "$IMAGE:$SHORT_SHA"
+          buildah push --storage-driver "$STORAGE_DRIVER" "$IMAGE:latest"
+          buildah push --storage-driver "$STORAGE_DRIVER" "$IMAGE:$SHORT_SHA"
 
       - name: Publish log to publish-log branch
         if: always()
