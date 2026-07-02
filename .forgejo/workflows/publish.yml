@@ -1,52 +1,24 @@
 name: publish
 
-# Build the inkwell image and push it to Codeberg's built-in container
-# registry on every push to main. Tags: `latest` (moving) and the
-# short commit sha (stable). Codeberg's shared runners don't expose a
-# Docker daemon, so the build runs inside kaniko's :debug image
-# (which has /kaniko/executor plus a busybox shell).
-
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - 'theme/**'
-      - 'book.toml'
-      - '.forgejo/workflows/docs.yml'
-      - '*.md'
 
 jobs:
-  image:
+  probe:
     runs-on: codeberg-medium
-    permissions:
-      contents: read
-      packages: write
-    container:
-      image: gcr.io/kaniko-project/executor:debug
     steps:
       - uses: https://github.com/actions/checkout@v4
 
-      - name: Configure registry auth
-        env:
-          # `github.token` on Forgejo scopes to the repo; with the
-          # `packages: write` permission above it can push to the
-          # built-in container registry.
-          TOKEN: ${{ github.token }}
+      - name: What's on the runner
         run: |
-          mkdir -p /kaniko/.docker
-          AUTH=$(printf '%s:%s' "$GITHUB_ACTOR" "$TOKEN" | base64 | tr -d '\n')
-          cat > /kaniko/.docker/config.json <<EOF
-          {"auths":{"codeberg.org":{"auth":"$AUTH"}}}
-          EOF
-
-      - name: Build and push
-        run: |
-          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
-          /kaniko/executor \
-            --context="$GITHUB_WORKSPACE" \
-            --dockerfile=Dockerfile \
-            --destination=codeberg.org/kendal/inkwell:latest \
-            --destination=codeberg.org/kendal/inkwell:${SHORT_SHA} \
-            --snapshot-mode=redo \
-            --use-new-run
+          set -x
+          uname -a
+          id
+          echo "PATH=$PATH"
+          for cmd in docker podman buildah nerdctl kaniko skopeo; do
+            command -v "$cmd" && "$cmd" --version 2>&1 | head -1 || echo "  $cmd: not found"
+          done
+          command -v runc && runc --version 2>&1 | head -1 || echo "runc: not found"
+          ls -la /var/run/docker.sock 2>&1 || true
+          ls -la /run/podman/podman.sock 2>&1 || true
