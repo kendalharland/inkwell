@@ -19,6 +19,10 @@ jobs:
       # on Codeberg's shared runners.
       STORAGE_DRIVER: vfs
       BUILDAH_ISOLATION: chroot
+      # Pin the auth file so `buildah login` and `buildah push` share
+      # the same credentials store regardless of storage-driver
+      # differences that would otherwise split their default paths.
+      REGISTRY_AUTH_FILE: /tmp/auth.json
     steps:
       - uses: https://github.com/actions/checkout@v4
 
