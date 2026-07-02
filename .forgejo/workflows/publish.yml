@@ -11,12 +11,6 @@ name: publish
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - 'theme/**'
-      - 'book.toml'
-      - '.forgejo/workflows/docs.yml'
-      - '*.md'
 
 jobs:
   image:
