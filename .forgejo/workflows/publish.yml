@@ -1,64 +1,70 @@
 name: publish
 
+# Build the inkwell image and push it to Codeberg's built-in container
+# registry on every push to main that changes code.
+#
+# Codeberg's shared runners expose the docker CLI but no daemon
+# socket, so this workflow uses buildah (installed via apt) as the
+# builder. Buildah is daemon-less and handles the standard Dockerfile
+# in the repo without needing BuildKit.
+
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'theme/**'
+      - 'book.toml'
+      - '.forgejo/workflows/docs.yml'
+      - '*.md'
 
 jobs:
-  probe:
+  image:
     runs-on: codeberg-medium
     permissions:
-      contents: write
+      contents: read
+      packages: write
+    env:
+      REGISTRY: codeberg.org
+      IMAGE: codeberg.org/kendal/inkwell
     steps:
       - uses: https://github.com/actions/checkout@v4
 
-      - name: Collect runner facts
+      - name: Install buildah
         run: |
-          {
-            echo "# Runner capabilities  ($(date -u))"
-            echo ""
-            echo "## Kernel + user"
-            uname -a
-            id
-            echo ""
-            echo "## PATH"
-            echo "$PATH"
-            echo ""
-            echo "## Container tools"
-            for cmd in docker podman buildah nerdctl kaniko skopeo img runc crun umoci; do
-              if command -v "$cmd" >/dev/null; then
-                printf '  %-10s -> %s\n' "$cmd" "$(command -v $cmd)"
-                "$cmd" --version 2>&1 | head -1 | sed 's/^/    /'
-              else
-                echo "  $cmd: not found"
-              fi
-            done
-            echo ""
-            echo "## Sockets"
-            ls -la /var/run/docker.sock 2>/dev/null || echo "  no /var/run/docker.sock"
-            ls -la /run/podman/podman.sock 2>/dev/null || echo "  no /run/podman/podman.sock"
-            ls -la /run/user/*/podman/podman.sock 2>/dev/null || true
-            echo ""
-            echo "## /etc/os-release"
-            cat /etc/os-release 2>/dev/null || echo "  no /etc/os-release"
-            echo ""
-            echo "## Env"
-            env | grep -E '^(HOME|GITHUB|CI|RUNNER)_' | sort
-          } > PROBE.md
+          set -euo pipefail
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            buildah ca-certificates
+          buildah --version
 
-      - name: Publish to probe branch
+      - name: Log in to Codeberg registry
         env:
+          # `github.token` on Forgejo scopes to this repo. Combined
+          # with the `packages: write` permission above, it can push
+          # to the built-in container registry as the invoking user.
           TOKEN: ${{ github.token }}
-          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
         run: |
-          mkdir /tmp/probe-out
-          cp PROBE.md /tmp/probe-out/
-          cd /tmp/probe-out
-          git init -q -b probe
-          git config user.email "ci@codeberg.org"
-          git config user.name "Codeberg CI"
-          git add PROBE.md
-          git commit -q -m "Probe from ${GITHUB_SHA:0:7}"
-          git push -q --force \
-            "https://x-access-token:${TOKEN}@${REPO_URL#https://}" \
-            probe
+          printf '%s' "$TOKEN" | buildah login \
+            --username "$GITHUB_ACTOR" \
+            --password-stdin \
+            "$REGISTRY"
+
+      - name: Build image
+        run: |
+          set -euo pipefail
+          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          # --isolation=chroot avoids requiring user namespaces, which
+          # can be finicky inside a CI container.
+          buildah build \
+            --isolation=chroot \
+            -t "$IMAGE:latest" \
+            -t "$IMAGE:$SHORT_SHA" \
+            .
+
+      - name: Push image
+        run: |
+          set -euo pipefail
+          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          buildah push "$IMAGE:latest"
+          buildah push "$IMAGE:$SHORT_SHA"
