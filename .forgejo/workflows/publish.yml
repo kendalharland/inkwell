@@ -7,18 +7,58 @@ on:
 jobs:
   probe:
     runs-on: codeberg-medium
+    permissions:
+      contents: write
     steps:
       - uses: https://github.com/actions/checkout@v4
 
-      - name: What's on the runner
+      - name: Collect runner facts
         run: |
-          set -x
-          uname -a
-          id
-          echo "PATH=$PATH"
-          for cmd in docker podman buildah nerdctl kaniko skopeo; do
-            command -v "$cmd" && "$cmd" --version 2>&1 | head -1 || echo "  $cmd: not found"
-          done
-          command -v runc && runc --version 2>&1 | head -1 || echo "runc: not found"
-          ls -la /var/run/docker.sock 2>&1 || true
-          ls -la /run/podman/podman.sock 2>&1 || true
+          {
+            echo "# Runner capabilities  ($(date -u))"
+            echo ""
+            echo "## Kernel + user"
+            uname -a
+            id
+            echo ""
+            echo "## PATH"
+            echo "$PATH"
+            echo ""
+            echo "## Container tools"
+            for cmd in docker podman buildah nerdctl kaniko skopeo img runc crun umoci; do
+              if command -v "$cmd" >/dev/null; then
+                printf '  %-10s -> %s\n' "$cmd" "$(command -v $cmd)"
+                "$cmd" --version 2>&1 | head -1 | sed 's/^/    /'
+              else
+                echo "  $cmd: not found"
+              fi
+            done
+            echo ""
+            echo "## Sockets"
+            ls -la /var/run/docker.sock 2>/dev/null || echo "  no /var/run/docker.sock"
+            ls -la /run/podman/podman.sock 2>/dev/null || echo "  no /run/podman/podman.sock"
+            ls -la /run/user/*/podman/podman.sock 2>/dev/null || true
+            echo ""
+            echo "## /etc/os-release"
+            cat /etc/os-release 2>/dev/null || echo "  no /etc/os-release"
+            echo ""
+            echo "## Env"
+            env | grep -E '^(HOME|GITHUB|CI|RUNNER)_' | sort
+          } > PROBE.md
+
+      - name: Publish to probe branch
+        env:
+          TOKEN: ${{ github.token }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          mkdir /tmp/probe-out
+          cp PROBE.md /tmp/probe-out/
+          cd /tmp/probe-out
+          git init -q -b probe
+          git config user.email "ci@codeberg.org"
+          git config user.name "Codeberg CI"
+          git add PROBE.md
+          git commit -q -m "Probe from ${GITHUB_SHA:0:7}"
+          git push -q --force \
+            "https://x-access-token:${TOKEN}@${REPO_URL#https://}" \
+            probe
