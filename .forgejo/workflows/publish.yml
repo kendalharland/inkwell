@@ -1,13 +1,5 @@
 name: publish
 
-# Build the inkwell image and push it to Codeberg's built-in container
-# registry on every push to main that changes code.
-#
-# Codeberg's shared runners expose the docker CLI but no daemon
-# socket, so this workflow uses buildah (installed via apt) as the
-# builder. Buildah is daemon-less and handles the standard Dockerfile
-# in the repo without needing BuildKit.
-
 on:
   push:
     branches: [main]
@@ -16,7 +8,7 @@ jobs:
   image:
     runs-on: codeberg-medium
     permissions:
-      contents: read
+      contents: write
       packages: write
     env:
       REGISTRY: codeberg.org
@@ -24,41 +16,57 @@ jobs:
     steps:
       - uses: https://github.com/actions/checkout@v4
 
-      - name: Install buildah
+      - name: Build and push (with log capture)
+        id: build
+        continue-on-error: true
+        env:
+          TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -x
+          exec > >(tee -a /tmp/publish.log) 2>&1
+
+          echo "===== install buildah ====="
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             buildah ca-certificates
           buildah --version
 
-      - name: Log in to Codeberg registry
-        env:
-          # `github.token` on Forgejo scopes to this repo. Combined
-          # with the `packages: write` permission above, it can push
-          # to the built-in container registry as the invoking user.
-          TOKEN: ${{ github.token }}
-        run: |
+          echo "===== login ====="
           printf '%s' "$TOKEN" | buildah login \
             --username "$GITHUB_ACTOR" \
             --password-stdin \
             "$REGISTRY"
 
-      - name: Build image
-        run: |
-          set -euo pipefail
+          echo "===== build ====="
           SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
-          # --isolation=chroot avoids requiring user namespaces, which
-          # can be finicky inside a CI container.
           buildah build \
             --isolation=chroot \
             -t "$IMAGE:latest" \
             -t "$IMAGE:$SHORT_SHA" \
             .
 
-      - name: Push image
-        run: |
-          set -euo pipefail
-          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          echo "===== push ====="
           buildah push "$IMAGE:latest"
           buildah push "$IMAGE:$SHORT_SHA"
+
+      - name: Publish log to publish-log branch
+        if: always()
+        env:
+          TOKEN: ${{ github.token }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          mkdir -p /tmp/logdir
+          cp /tmp/publish.log /tmp/logdir/PUBLISH.log || echo "no log captured" > /tmp/logdir/PUBLISH.log
+          cd /tmp/logdir
+          git init -q -b publish-log
+          git config user.email "ci@codeberg.org"
+          git config user.name "Codeberg CI"
+          git add PUBLISH.log
+          git commit -q -m "Log from ${GITHUB_SHA:0:7}"
+          git push -q --force \
+            "https://x-access-token:${TOKEN}@${REPO_URL#https://}" \
+            publish-log
+
+      - name: Fail job if the build step failed
+        if: steps.build.outcome == 'failure'
+        run: exit 1
