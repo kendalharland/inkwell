@@ -110,17 +110,42 @@ pub async fn fetch_and_transcode(http: &reqwest::Client, url: &str) -> Result<Ve
 /// search loop. Split out from `fetch_and_transcode` so tests can
 /// exercise it without a network or HTTP client.
 pub fn transcode_bytes(bytes: &[u8]) -> Result<Vec<u8>> {
-    // image::load_from_memory sniffs the format; transparent PNGs are
-    // flattened during JPEG encode (JPEG has no alpha) so the Kindle
-    // sees a solid background instead of a black-on-black image.
     let fmt = image::guess_format(bytes).context("could not identify image format")?;
     let img = decode_with_format(bytes, fmt).context("decoding image bytes")?;
     let img = downscale_if_needed(img);
-    // Always flatten alpha onto a white background before encoding so
-    // PNGs with transparent backgrounds don't become solid black on
-    // the Kindle's grayscale renderer.
-    let rgb = img.to_rgb8();
+    let rgb = flatten_over_white(&img);
     encode_jpeg_within_budget(&rgb)
+}
+
+/// Composite `img` over a solid white background and return the
+/// resulting RGB image. `DynamicImage::to_rgb8` on its own only drops
+/// the alpha channel — a `(0, 0, 0, 0)` transparent-black pixel (which
+/// is exactly how WordPress and most LaTeX renderers encode the
+/// negative space around glyphs) becomes solid `(0, 0, 0)`, and the
+/// output JPEG shows a black rectangle instead of the equation
+/// (#25). Blending against white first gives the same visual result
+/// the source browser would render.
+fn flatten_over_white(img: &DynamicImage) -> image::RgbImage {
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    let mut out = image::RgbImage::new(w, h);
+    for (x, y, p) in rgba.enumerate_pixels() {
+        let [r, g, b, a] = p.0;
+        if a == 255 {
+            out.put_pixel(x, y, image::Rgb([r, g, b]));
+            continue;
+        }
+        // Alpha-composite over white (255, 255, 255):
+        //   out = fg * a + bg * (1 - a),  with a in [0, 1].
+        let inv = 255 - a as u16;
+        let a = a as u16;
+        let blend = |c: u8| -> u8 {
+            // c*a + 255*(1-a), divided by 255, rounded to nearest.
+            (((c as u16) * a + 255u16 * inv + 127) / 255) as u8
+        };
+        out.put_pixel(x, y, image::Rgb([blend(r), blend(g), blend(b)]));
+    }
+    out
 }
 
 fn decode_with_format(bytes: &[u8], fmt: ImageFormat) -> Result<DynamicImage> {
@@ -267,6 +292,111 @@ mod tests {
         let out = transcode_bytes(&buf).unwrap();
         assert!(is_jpeg(&out));
         assert_eq!(dims(&out), (32, 32));
+    }
+
+    // ----- alpha compositing (issue #25) ---------------------------------
+    //
+    // These tests all pass an RGBA PNG through the full transcode and
+    // decode the output JPEG to check the actual pixel colors. JPEG is
+    // lossy, so exact equality won't hold; the assertions use generous
+    // ranges (>240 for near-white, <30 for near-black).
+
+    fn decoded_center_pixel(bytes: &[u8]) -> (u8, u8, u8) {
+        let img = image::load_from_memory(bytes).unwrap().to_rgb8();
+        let (w, h) = img.dimensions();
+        let p = img.get_pixel(w / 2, h / 2);
+        (p[0], p[1], p[2])
+    }
+
+    fn rgba_png(w: u32, h: u32, color: [u8; 4]) -> Vec<u8> {
+        use image::{ImageBuffer, Rgba};
+        let rgba: image::RgbaImage = ImageBuffer::from_pixel(w, h, Rgba(color));
+        let mut buf = Vec::new();
+        DynamicImage::ImageRgba8(rgba)
+            .write_to(&mut std::io::Cursor::new(&mut buf), ImageFormat::Png)
+            .unwrap();
+        buf
+    }
+
+    #[test]
+    fn transcode_composites_transparent_black_over_white() {
+        // Regression for #25: WordPress renders LaTeX equations as
+        // PNGs with black glyphs on a fully-transparent background.
+        // Without alpha compositing, the (0,0,0,0) background pixels
+        // become RGB(0,0,0) — a solid black rectangle, exactly what
+        // shipped and was reported. After compositing over white the
+        // background must be near-white.
+        let png = rgba_png(64, 64, [0, 0, 0, 0]);
+        let out = transcode_bytes(&png).unwrap();
+        let (r, g, b) = decoded_center_pixel(&out);
+        assert!(
+            r > 240 && g > 240 && b > 240,
+            "expected near-white after compositing (0,0,0,0) over white, got ({r},{g},{b})",
+        );
+    }
+
+    #[test]
+    fn transcode_keeps_opaque_black_pixels_black() {
+        // The inverse guard: don't accidentally lighten a genuinely
+        // opaque black pixel. Text glyphs in LaTeX are alpha=255 black
+        // and must stay black after compositing.
+        let png = rgba_png(64, 64, [0, 0, 0, 255]);
+        let out = transcode_bytes(&png).unwrap();
+        let (r, g, b) = decoded_center_pixel(&out);
+        assert!(
+            r < 30 && g < 30 && b < 30,
+            "expected near-black to survive JPEG round-trip, got ({r},{g},{b})",
+        );
+    }
+
+    #[test]
+    fn transcode_semi_transparent_black_becomes_grey() {
+        // 50% transparent black → mid grey after compositing over
+        // white. Verifies the blend formula, not just the two
+        // extremes.
+        let png = rgba_png(64, 64, [0, 0, 0, 128]);
+        let out = transcode_bytes(&png).unwrap();
+        let (r, g, b) = decoded_center_pixel(&out);
+        for c in [r, g, b] {
+            assert!(
+                (100..=155).contains(&c),
+                "expected mid-grey (~128) from 50% transparent black, got ({r},{g},{b})",
+            );
+        }
+    }
+
+    #[test]
+    fn transcode_composites_transparent_red_over_white_as_white() {
+        // (255,0,0,0) is still a fully-transparent pixel — the RGB
+        // channels are ignored by the alpha channel. This mirrors the
+        // existing `transcode_flattens_transparent_png_to_opaque_jpeg`
+        // test but now also asserts the color is near-white, not red.
+        let png = rgba_png(64, 64, [255, 0, 0, 0]);
+        let out = transcode_bytes(&png).unwrap();
+        let (r, g, b) = decoded_center_pixel(&out);
+        assert!(
+            r > 240 && g > 240 && b > 240,
+            "expected near-white for transparent-red pixel, got ({r},{g},{b})",
+        );
+    }
+
+    #[test]
+    fn flatten_over_white_pure_function_matches_expected_pixels() {
+        // Unit test on the compositing helper without the JPEG round-
+        // trip, so the exact math can be pinned without JPEG's lossy
+        // encoding softening the values.
+        use image::{ImageBuffer, Rgba};
+        let mut src: image::RgbaImage = ImageBuffer::new(3, 1);
+        src.put_pixel(0, 0, Rgba([0, 0, 0, 0])); // transparent
+        src.put_pixel(1, 0, Rgba([0, 0, 0, 128])); // 50% black
+        src.put_pixel(2, 0, Rgba([255, 0, 0, 255])); // opaque red
+
+        let out = flatten_over_white(&DynamicImage::ImageRgba8(src));
+        assert_eq!(out.get_pixel(0, 0).0, [255, 255, 255]); // fully white
+                                                            // 128/255 ≈ 0.502 blend of (0,0,0) with (255,255,255) →
+                                                            // (255*127 + 127)/255 = 127.  Slightly darker than 50% grey.
+        assert_eq!(out.get_pixel(1, 0).0, [127, 127, 127]);
+        assert_eq!(out.get_pixel(2, 0).0, [255, 0, 0]); // unchanged
     }
 
     // ----- size budget ----------------------------------------------------
