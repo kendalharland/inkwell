@@ -230,38 +230,20 @@ html.sidebar-visible #page-toc {
 }
 
 /* ---- landing-page screenshot rotator ------------------------------------
-   Three-image carousel on index.md. All images sit stacked with
-   `position: absolute` inside the container; the active one fades to
-   opacity 1 and the rest fade to 0. The container's aspect-ratio is
-   driven by a CSS custom property that the rotator JS updates on every
-   swap, so each screenshot renders at its own natural aspect (2:1
-   desktop landscape vs ~0.9:1 Kindle portrait) instead of being
-   letterboxed inside a single fixed frame.                              */
+   Three-image carousel on index.md. All source images are cropped to
+   the same dimensions, so every image stacks in a single CSS grid
+   cell — the container inherits its size from the first image and no
+   aspect-ratio or per-image sizing needs to be hardcoded here.        */
 .screenshot-rotator {
-  position: relative;
-  width: 100%;
-  max-width: 640px;
-  margin: 1em auto;
-  aspect-ratio: var(--rotator-aspect, 2);
-  transition: aspect-ratio 500ms ease;
-  background: #f2ede2;
-  border: 1px solid var(--table-border-color);
-  border-radius: 4px;
-  overflow: hidden;
-  box-shadow: 0 1px 8px rgba(0,0,0,.04);
+  display: grid;
+  margin: 1em 0;
 }
 .screenshot-rotator img {
-  position: absolute;
-  inset: 0;
+  grid-area: 1 / 1;
   width: 100%;
-  height: 100%;
-  object-fit: contain;
+  height: auto;
   opacity: 0;
   transition: opacity 600ms ease;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
 }
 .screenshot-rotator img.active {
   opacity: 1;
