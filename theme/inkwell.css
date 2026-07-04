@@ -229,26 +229,6 @@ html.sidebar-visible #page-toc {
   margin: 1em 0;
 }
 
-/* ---- landing-page screenshot rotator ------------------------------------
-   Three-image carousel on index.md. All source images are cropped to
-   the same dimensions, so every image stacks in a single CSS grid
-   cell — the container inherits its size from the first image and no
-   aspect-ratio or per-image sizing needs to be hardcoded here.        */
-.screenshot-rotator {
-  display: grid;
-  margin: 1em 0;
-}
-.screenshot-rotator img {
-  grid-area: 1 / 1;
-  width: 100%;
-  height: auto;
-  opacity: 0;
-  transition: opacity 600ms ease;
-}
-.screenshot-rotator img.active {
-  opacity: 1;
-}
-
 /* ---- hide the theme picker (light-only) --------------------------------- */
 
 #theme-toggle,
