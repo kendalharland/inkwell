@@ -30,7 +30,12 @@ jobs:
         id: build
         continue-on-error: true
         env:
-          TOKEN: ${{ github.token }}
+          # The ephemeral `github.token` passes `buildah login` but is
+          # rejected on package push (Codeberg's Forgejo scopes it to
+          # read-only). PACKAGE_TOKEN is a user-created PAT with the
+          # `write:package` scope, configured under Settings → Actions
+          # → Secrets on the repo.
+          TOKEN: ${{ secrets.PACKAGE_TOKEN }}
         run: |
           set -x
           exec > >(tee -a /tmp/publish.log) 2>&1
