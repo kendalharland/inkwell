@@ -5,7 +5,11 @@ static HTML tuned for the built-in browser on a Kindle. Background
 jobs pre-extract every article and transcode every embedded image, so
 a tap on the device fetches ready-to-render bytes from local disk.
 
-![inkwell home screen on a Kindle](img/home.png)
+<div class="screenshot-rotator" aria-label="inkwell screenshots">
+  <img src="img/home.png" alt="Feeds view rendered in a desktop browser" class="active">
+  <img src="img/kindle-listing.jpg" alt="All-stories listing on a Kindle">
+  <img src="img/kindle-article.jpg" alt="An article opened on a Kindle">
+</div>
 
 ## Documentation
 
