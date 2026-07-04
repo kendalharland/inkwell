@@ -146,8 +146,6 @@
     if (imgs.length <= 1) return;
 
     var idx = 0;
-    // Find whichever image the markup marked as initially active so
-    // subsequent cycles start from the right place. Default to 0.
     for (var i = 0; i < imgs.length; i++) {
       if (imgs[i].classList.contains("active")) {
         idx = i;
@@ -155,10 +153,20 @@
       }
     }
 
+    // Drive container aspect-ratio from the active image's data-aspect
+    // attribute so a landscape 2:1 screenshot doesn't get letterboxed
+    // inside a portrait 3:4 box (or vice versa). CSS handles the tween.
+    function applyAspect(i) {
+      var ar = imgs[i].getAttribute("data-aspect");
+      if (ar) rotator.style.setProperty("--rotator-aspect", ar);
+    }
+    applyAspect(idx);
+
     setInterval(function () {
       imgs[idx].classList.remove("active");
       idx = (idx + 1) % imgs.length;
       imgs[idx].classList.add("active");
+      applyAspect(idx);
     }, ROTATE_MS);
   }
 
