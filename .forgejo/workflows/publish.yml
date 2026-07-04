@@ -43,9 +43,14 @@ jobs:
 
           echo "===== login ====="
           printf '%s' "$TOKEN" | buildah login \
+            --storage-driver "$STORAGE_DRIVER" \
             --username "$GITHUB_ACTOR" \
             --password-stdin \
             "$REGISTRY"
+
+          echo "===== inspect auth ====="
+          ls -la "$REGISTRY_AUTH_FILE" || echo "no auth file at $REGISTRY_AUTH_FILE"
+          cat "$REGISTRY_AUTH_FILE" | python3 -c 'import sys,json; d=json.load(sys.stdin); print("hosts:", list(d.get("auths",{}).keys()))' || true
 
           echo "===== build ====="
           SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
@@ -56,8 +61,14 @@ jobs:
             .
 
           echo "===== push ====="
-          buildah push --storage-driver "$STORAGE_DRIVER" "$IMAGE:latest"
-          buildah push --storage-driver "$STORAGE_DRIVER" "$IMAGE:$SHORT_SHA"
+          buildah push \
+            --storage-driver "$STORAGE_DRIVER" \
+            --creds "$GITHUB_ACTOR:$TOKEN" \
+            "$IMAGE:latest"
+          buildah push \
+            --storage-driver "$STORAGE_DRIVER" \
+            --creds "$GITHUB_ACTOR:$TOKEN" \
+            "$IMAGE:$SHORT_SHA"
 
       - name: Publish log to publish-log branch
         if: always()
