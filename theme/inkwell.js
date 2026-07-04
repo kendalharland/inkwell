@@ -130,3 +130,36 @@
     build();
   }
 })();
+
+// Landing-page screenshot rotator: crossfade through every <img> child
+// of .screenshot-rotator every ROTATE_MS. Assumes the first <img>
+// starts with the `active` class (matching the markup in index.md).
+// No-op when the container isn't on the current page or contains only
+// one image.
+(function () {
+  var ROTATE_MS = 4000;
+
+  function startRotator() {
+    var rotator = document.querySelector(".screenshot-rotator");
+    if (!rotator) return;
+    var imgs = rotator.querySelectorAll("img");
+    if (imgs.length <= 1) return;
+
+    var idx = 0;
+    for (var i = 0; i < imgs.length; i++) {
+      if (imgs[i].classList.contains("active")) { idx = i; break; }
+    }
+
+    setInterval(function () {
+      imgs[idx].classList.remove("active");
+      idx = (idx + 1) % imgs.length;
+      imgs[idx].classList.add("active");
+    }, ROTATE_MS);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startRotator);
+  } else {
+    startRotator();
+  }
+})();

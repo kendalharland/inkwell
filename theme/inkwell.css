@@ -229,6 +229,21 @@ html.sidebar-visible #page-toc {
   margin: 1em 0;
 }
 
+/* Landing-page screenshot rotator. Every source image is pre-cropped
+   to the same dimensions, so a single-cell CSS grid can stack them:
+   the container inherits its size from the images themselves and the
+   layout is identical to a plain <img> at the same size — no
+   hardcoded width, aspect ratio, or container background. */
+.screenshot-rotator { display: grid; }
+.screenshot-rotator img {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: auto;
+  opacity: 0;
+  transition: opacity 600ms ease;
+}
+.screenshot-rotator img.active { opacity: 1; }
+
 /* ---- hide the theme picker (light-only) --------------------------------- */
 
 #theme-toggle,
