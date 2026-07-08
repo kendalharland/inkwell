@@ -85,6 +85,11 @@ User-visible behaviour changes and their docs edit land in the same
 commit — the docs site is part of the feature surface, not a
 follow-up.
 
+
+
+<a href="https://www.buymeacoffee.com/kendalharland" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 15px !important;width: 40px !important;" ></a>
+
+
 ## License
 
 MIT or Apache-2.0, at your option. See [LICENSE](LICENSE).
