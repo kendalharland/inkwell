@@ -85,10 +85,12 @@ User-visible behaviour changes and their docs edit land in the same
 commit — the docs site is part of the feature surface, not a
 follow-up.
 
+## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to file issues, open
+PRs, and the project's stance on AI-assisted contributions.
 
 <a href="https://www.buymeacoffee.com/kendalharland" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 15px !important;width: 40px !important;" ></a>
-
 
 ## License
 
